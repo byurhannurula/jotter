@@ -794,18 +794,6 @@ body.no-preview-btn #preview-toggle {
   }
 }
 
-.about-card,
-.sheet {
-  position: relative;
-  border-radius: 16px;
-  background: var(--card-bg);
-  border: 1px solid var(--hairline);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
-  animation: card-in 0.24s var(--ease);
-}
-
-.modal-backdrop.closing .about-card,
-.modal-backdrop.closing .sheet,
 .modal-backdrop.closing .settings-window {
   animation: card-out 0.16s ease forwards;
 }
@@ -845,13 +833,7 @@ body.no-preview-btn #preview-toggle {
   color: var(--text);
 }
 
-/* About */
-
-.about-card {
-  width: 320px;
-  padding: 30px 28px 22px;
-  text-align: center;
-}
+/* About icon (About hero + easter egg) */
 
 .about-icon {
   border: none;
@@ -870,144 +852,13 @@ body.no-preview-btn #preview-toggle {
   display: block;
 }
 
-.about-card.egg .about-icon svg {
-  animation: spin 0.7s var(--ease);
-}
-
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-.about-name {
-  margin-top: 14px;
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-}
-
-.about-version {
-  margin-top: 2px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.about-tagline {
-  margin-top: 14px;
-  font-size: 13px;
-  color: var(--text);
-  opacity: 0.85;
-}
-
-.about-egg {
-  margin-top: 14px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--field-bg);
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--text);
-  opacity: 0.9;
-  animation: card-in 0.28s var(--ease);
-}
-
-.about-egg[hidden] {
-  display: none;
-}
-
-.about-egg p {
-  margin: 0 0 6px;
-}
-
-.about-egg .sig {
-  margin: 8px 0 0;
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.about-by {
-  margin-top: 14px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.about-links {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin-top: 12px;
-  text-align: left;
-}
-
-.about-link {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  border: none;
-  background: transparent;
-  padding: 6px 8px;
-  border-radius: 8px;
-  font: inherit;
-  cursor: default;
-  transition: background 0.14s ease;
-}
-
-.about-link:hover {
-  background: var(--field-bg);
-}
-
-.about-link .lbl {
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.about-link .url {
-  flex: 0 1 auto;
-  font-size: 12px;
-  color: var(--accent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.about-link:hover .url {
-  text-decoration: underline;
-}
-
-.about-credit {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px solid var(--hairline);
-  font-size: 11px;
-  color: var(--faint);
-}
-
-/* Settings */
-
-.sheet {
-  width: 360px;
-  padding: 16px 20px 20px;
-}
-
-.sheet-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.sheet-title {
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.sheet .modal-close {
-  position: static;
-}
+/* Settings rows (shared by the segmented + grouped-card layouts) */
 
 .setting-row {
   display: flex;
@@ -1131,49 +982,6 @@ body.no-preview-btn #preview-toggle {
 }
 .settings-section[hidden] {
   display: none;
-}
-
-/* About, rehomed inside the settings pane (no card chrome) */
-.settings-content .about-card {
-  width: auto;
-  padding: 6px 0 0;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  animation: none;
-}
-
-/* Updates section */
-.settings-hero {
-  margin-bottom: 16px;
-}
-.hero-name {
-  font-size: 17px;
-  font-weight: 700;
-}
-.hero-sub {
-  margin-top: 2px;
-  font-size: 12.5px;
-  color: var(--muted);
-}
-.btn-line {
-  border: 1px solid var(--hairline);
-  background: var(--field-bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  padding: 7px 14px;
-  border-radius: 8px;
-  cursor: default;
-  transition: background 0.12s ease;
-}
-.btn-line:hover {
-  background: var(--item-hover);
-}
-.settings-note {
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 /* Grouped-card sections (macOS-settings style) */

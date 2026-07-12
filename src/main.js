@@ -268,9 +268,11 @@ function updateStatus() {
   const countEl = document.getElementById("status-count");
   if (!posEl || !countEl) return;
 
-  const text = editor.value;
-  const trimmed = text.trim();
-  const words = trimmed ? trimmed.split(/\s+/).length : 0;
+  // Use the model's copy (kept in sync by flushUi/applyEditorValue) rather than
+  // re-reading the whole textarea value every frame.
+  const d = drafts.get(currentId);
+  const text = d ? d.content : "";
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   const chars = text.length;
   countEl.textContent =
     `${words} ${words === 1 ? "word" : "words"} · ` +
@@ -283,7 +285,7 @@ function updateStatus() {
   const caret = editor.selectionStart;
   const before = text.slice(0, caret);
   const line = before.split("\n").length;
-  const col = caret - before.lastIndexOf("\n"); // 1-based (lastIndexOf -1 → col 1)
+  const col = caret - before.lastIndexOf("\n"); // 1-based (no newline → col 1)
   posEl.textContent = `Ln ${line}, Col ${col}`;
 }
 
@@ -685,7 +687,9 @@ function markControl(name, val) {
   const el = document.getElementById(`set-${name}`);
   if (!el) return;
   if (SETTINGS[name].control === "toggle") {
-    el.classList.toggle("on", String(val) === "on");
+    const on = String(val) === "on";
+    el.classList.toggle("on", on);
+    el.setAttribute("aria-checked", on ? "true" : "false");
   } else {
     for (const btn of el.querySelectorAll("button")) {
       btn.classList.toggle("active", btn.dataset.val === String(val));
