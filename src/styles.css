@@ -19,6 +19,10 @@
   --item-active: rgba(10, 132, 255, 0.16);
   --field-bg: rgba(0, 0, 0, 0.05);
   --card-bg: rgba(250, 250, 250, 0.92);
+  --settings-bg: #f1f1f3;
+  --settings-card: #ffffff;
+  --settings-rail: #e9e9ec;
+  --settings-border: rgba(0, 0, 0, 0.1);
   --sidebar-w: 250px;
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
@@ -38,6 +42,10 @@
     --item-active: rgba(64, 156, 255, 0.22);
     --field-bg: rgba(255, 255, 255, 0.06);
     --card-bg: #262626;
+    --settings-bg: #232326;
+    --settings-card: #2c2c30;
+    --settings-rail: #1c1c1e;
+    --settings-border: rgba(255, 255, 255, 0.09);
   }
 }
 
@@ -55,6 +63,10 @@ html[data-theme="light"] {
   --item-active: rgba(10, 132, 255, 0.16);
   --field-bg: rgba(0, 0, 0, 0.05);
   --card-bg: rgba(250, 250, 250, 0.92);
+  --settings-bg: #f1f1f3;
+  --settings-card: #ffffff;
+  --settings-rail: #e9e9ec;
+  --settings-border: rgba(0, 0, 0, 0.1);
 }
 
 html[data-theme="dark"] {
@@ -70,6 +82,10 @@ html[data-theme="dark"] {
   --item-active: rgba(64, 156, 255, 0.22);
   --field-bg: rgba(255, 255, 255, 0.06);
   --card-bg: #262626;
+  --settings-bg: #232326;
+  --settings-card: #2c2c30;
+  --settings-rail: #1c1c1e;
+  --settings-border: rgba(255, 255, 255, 0.09);
 }
 
 * {
@@ -752,7 +768,8 @@ body.sidebar-hidden .tabbar {
 }
 
 .modal-backdrop.closing .about-card,
-.modal-backdrop.closing .sheet {
+.modal-backdrop.closing .sheet,
+.modal-backdrop.closing .settings-window {
   animation: card-out 0.16s ease forwards;
 }
 
@@ -999,6 +1016,325 @@ body.sidebar-hidden .tabbar {
 }
 
 /* ---- Reduced motion ---- */
+
+/* ---- Settings window (rail + sections) ---- */
+
+.settings-window {
+  display: flex;
+  width: 640px;
+  max-width: 92vw;
+  height: 470px;
+  max-height: 86vh;
+  border-radius: 16px;
+  background: var(--settings-bg);
+  border: 1px solid var(--settings-border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+  animation: card-in 0.24s var(--ease);
+}
+
+.settings-rail {
+  flex: 0 0 170px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  background: var(--settings-rail);
+  border-right: 1px solid var(--settings-border);
+}
+
+.rail-title {
+  padding: 4px 10px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: default;
+  transition: background 0.12s ease;
+}
+.rail-item svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.rail-item.active svg {
+  color: var(--accent);
+}
+.rail-item:hover {
+  background: var(--item-hover);
+}
+.rail-item.active {
+  background: var(--item-active);
+}
+
+.settings-content {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 42px 22px 24px; /* top clears the floating close button */
+}
+.settings-content .modal-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+}
+.settings-section[hidden] {
+  display: none;
+}
+
+/* About, rehomed inside the settings pane (no card chrome) */
+.settings-content .about-card {
+  width: auto;
+  padding: 6px 0 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  animation: none;
+}
+
+/* Updates section */
+.settings-hero {
+  margin-bottom: 16px;
+}
+.hero-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+.hero-sub {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.btn-line {
+  border: 1px solid var(--hairline);
+  background: var(--field-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  cursor: default;
+  transition: background 0.12s ease;
+}
+.btn-line:hover {
+  background: var(--item-hover);
+}
+.settings-note {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Grouped-card sections (macOS-settings style) */
+.settings-group-title {
+  margin: 18px 4px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.settings-group {
+  background: var(--settings-card);
+  border: 1px solid var(--settings-border);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.settings-group .setting-row,
+.settings-group .group-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 11px 14px;
+  border-top: 1px solid var(--settings-border);
+}
+.settings-group > .setting-row:first-child,
+.settings-group > .group-row:first-child {
+  border-top: none;
+}
+.group-label {
+  font-size: 13px;
+  color: var(--text);
+}
+.group-link {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 0;
+  cursor: default;
+}
+.group-link:hover {
+  text-decoration: underline;
+}
+
+/* About hero */
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: var(--settings-card);
+  border: 1px solid var(--settings-border);
+  border-radius: 12px;
+}
+.about-hero .about-icon {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: default;
+}
+.about-icon.egg svg {
+  animation: spin 0.7s var(--ease);
+}
+.about-hero-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+.about-hero-ver {
+  margin-top: 1px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.about-hero-desc {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* Placeholder switch (auto-update) */
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  border: none;
+  border-radius: 11px;
+  background: rgba(128, 128, 132, 0.35);
+  cursor: default;
+  opacity: 0.7;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.16s ease;
+}
+.switch.on {
+  background: var(--accent);
+  opacity: 1;
+}
+.switch.on::after {
+  transform: translateX(16px);
+}
+
+/* Shortcuts section */
+.shortcut-group {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.shortcut-group:first-child {
+  margin-top: 0;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 13px;
+}
+.shortcut-keys {
+  font-family: var(--mono-font);
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--field-bg);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+/* ---- Toast ---- */
+
+.toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 200;
+  pointer-events: none;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  pointer-events: auto;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  border-radius: 10px;
+  padding: 9px 10px 9px 14px;
+  font-size: 13px;
+  animation: toast-in 0.18s var(--ease);
+}
+.toast.out {
+  animation: toast-out 0.18s ease forwards;
+}
+.toast-action {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 7px;
+  cursor: default;
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,
