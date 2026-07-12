@@ -1,0 +1,30 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="tile" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#57adff"/>
+      <stop offset="1" stop-color="#0a67e6"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="512" y1="100" x2="512" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="blur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+  </defs>
+
+  <!-- rounded app tile -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#sheen)"/>
+
+  <!-- note card + soft shadow -->
+  <rect x="288" y="274" width="448" height="520" rx="40" fill="#052a60" opacity="0.33" filter="url(#blur)"/>
+  <rect x="288" y="252" width="448" height="520" rx="40" fill="#ffffff"/>
+
+  <!-- text lines (first is the accent 'title') -->
+  <rect x="344" y="352" width="188" height="26" rx="13" fill="#0a84ff"/>
+  <rect x="344" y="436" width="336" height="24" rx="12" fill="#d3dae3"/>
+  <rect x="344" y="512" width="336" height="24" rx="12" fill="#d3dae3"/>
+  <rect x="344" y="588" width="336" height="24" rx="12" fill="#d3dae3"/>
+  <rect x="344" y="664" width="230" height="24" rx="12" fill="#d3dae3"/>
+</svg>

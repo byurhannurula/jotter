@@ -1,0 +1,9 @@
+allowBuilds:
+  esbuild: true
+
+# Supply-chain hardening: refuse package versions published in the last 48h.
+minimumReleaseAge: 2880
+
+# Packages explicitly allowed to run install/build (lifecycle) scripts.
+onlyBuiltDependencies:
+  - esbuild

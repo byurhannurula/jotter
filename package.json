@@ -1,0 +1,51 @@
+{
+  "name": "mac-notepad",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A fast, minimal notepad with an autosaved drafts store, tabs, and markdown preview.",
+  "author": "Byurhan Nurula (https://byurhannurula.com/)",
+  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/byurhannurula/just-notepad",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/byurhannurula/just-notepad.git"
+  },
+  "bugs": {
+    "url": "https://github.com/byurhannurula/just-notepad/issues"
+  },
+  "keywords": [
+    "notepad",
+    "notes",
+    "text-editor",
+    "markdown",
+    "scratchpad",
+    "drafts",
+    "tauri",
+    "macos",
+    "desktop-app"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "ship": "bash install.sh",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "markdown-it": "^14.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
+  }
+}
