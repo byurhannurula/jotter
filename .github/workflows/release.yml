@@ -58,7 +58,14 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Notepad ${{ github.ref_name }}"
-          releaseBody: "Download the installer for your OS below. See the README for first-launch notes (unsigned builds)."
+          releaseBody: |
+            Download the installer for your OS below.
+
+            These builds are **not code-signed / notarized** (no paid developer accounts), so:
+
+            - **macOS** — Gatekeeper blocks the first launch. Open **System Settings → Privacy & Security**, scroll to the "Notepad.app was blocked" message and click **Open Anyway** — or run `xattr -dr com.apple.quarantine /Applications/Notepad.app`.
+            - **Windows** — SmartScreen may warn: **More info → Run anyway**.
+            - **Linux** — AppImage: `chmod +x` then run; or install the `.deb`.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

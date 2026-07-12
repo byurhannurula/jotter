@@ -1,75 +1,83 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128@2x.png" width="88" alt="Notepad icon" />
+
 # Notepad
 
-A fast, minimal notepad — a quiet place for quick thoughts.
+**A fast, minimal notepad — a quiet place for quick thoughts.**
 
-Open it and start typing. No "where do you want to save this?" dialog, no account, no cloud. Every scratch is auto‑kept in a local drafts store, so you never lose a note by starting a new one. When a draft graduates into a real file, `⌘S` gives it a home — that's the only time a save dialog appears.
+[![Download](https://img.shields.io/badge/Download-Latest%20Release-0a84ff?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/byurhannurula/just-notepad/releases/latest)
+
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-0a84ff.svg)](LICENSE)
+[![Built with Tauri](https://img.shields.io/badge/Built%20with-Tauri%202-24c8db.svg)](https://tauri.app)
+
+</div>
+
+Open it and start typing. No "where do you want to save this?" dialog, no account, no cloud. Every scratch is auto‑kept in a local drafts store, so you never lose a note by starting a new one. When a draft graduates into a real file, `⌘S` gives it a home — the only time a save dialog appears.
 
 Built with [Tauri 2](https://tauri.app) (Rust) + vanilla JS. Tiny bundle, native WebKit, instant startup.
 
 ![Notepad](docs/screenshot.png)
 
+> [!NOTE]
+> Notepad is built for my **personal use on macOS**. Windows and Linux binaries are produced by CI but are **not tested** — they may work, but no promises. Bug reports and PRs are welcome.
+
 ## Features
 
-- **Type instantly on launch** — fresh page every time; past notes live in the sidebar
-- **Autosaved drafts** — nothing is ever lost; browse/search them in the sidebar (`⌘B`)
+- **Type instantly on launch** — a fresh page every time; past notes live in the sidebar
+- **Autosaved drafts** — nothing is ever lost; browse and search them in the sidebar (`⌘B`)
 - **Tabs** — VSCode‑style; `⌘T` new, `⌘W` close, `⌃Tab` to cycle
 - **Markdown preview** — per‑tab Edit ⇄ Preview toggle (`⇧⌘P`)
 - **Find & Replace** (`⌘F`)
 - **Settings** — theme (system/light/dark), font (system/serif/mono/rounded), text size, word wrap
 - **Native feel** — overlay titlebar, light/dark, remembers window size
-- Small (~9 MB app), fast, everything stored locally
-
-## How it works
-
-Everything stays **local** — no account, no sync, no cloud.
-
-- **Autosave.** As you type, changes are written automatically ~400 ms after your last keystroke. There's no "unsaved" state and no `⌘S` ritual for everyday notes.
-- **Drafts store.** Every note is a small JSON file in the app's data directory (`~/Library/Application Support/com.byrhn.mac-notepad/drafts/` on macOS). The sidebar (`⌘B`) lists them newest‑first; a note shows up there as soon as it has content.
-- **Fresh page on launch.** Opening the app always gives you a clean page so you can type immediately — your previous notes are one click away in the sidebar. Empty, untouched notes are never saved and are pruned automatically.
-- **Real files, on demand.** `⌘S` / `⌘⇧S` writes the current draft to a `.txt`/`.md` file wherever you choose — the only time a save dialog appears. After that, autosave keeps that file up to date too.
-- **Tabs vs. drafts.** Tabs across the top are what's currently open; the sidebar is everything you've ever written. Click a sidebar item to open it in a tab.
-
-Because it's a plain `<textarea>` over a tiny native shell, startup is instant and typing stays snappy even in long notes (spellcheck auto‑disables past ~20k characters to avoid WebKit lag).
+- Small (~9 MB), fast, and everything stays on your machine
 
 ## Install
 
-Grab a build for your OS from the [Releases](https://github.com/byurhannurula/just-notepad/releases) page.
+Download the latest build from the [**Releases**](https://github.com/byurhannurula/just-notepad/releases/latest) page.
 
-- **macOS** — the app is not notarized (no paid Apple Developer account), so the first launch needs **right‑click → Open** once. After that it opens normally.
-- **Windows** — Windows may show a SmartScreen "unknown publisher" prompt; choose **More info → Run anyway**.
-- **Linux** — an AppImage (`chmod +x`, then run) and a `.deb` are provided.
+Because the app isn't code‑signed / notarized (no paid developer accounts), the OS will warn on first launch:
+
+- **macOS** — Gatekeeper blocks it. Open **System Settings → Privacy & Security**, scroll to the *"Notepad.app was blocked"* message, and click **Open Anyway** (authenticate, then confirm). It's trusted from then on. Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/Notepad.app`. _(On macOS 14 and earlier you can instead right‑click the app → Open.)_
+- **Windows** — SmartScreen may warn: **More info → Run anyway**.
+- **Linux** — AppImage: `chmod +x Notepad*.AppImage` then run; or install the `.deb`.
+
+## Usage
+
+Open the app and just type — the current note autosaves as you go. Use the sidebar to revisit past notes and tabs to keep a few open at once.
+
+| Shortcut | Action |
+| --- | --- |
+| `⌘N` / `⌘T` | New tab |
+| `⌘W` | Close tab |
+| `⌃Tab` / `⌃⇧Tab` | Next / previous tab |
+| `⌘O` | Open a file into a new tab |
+| `⌘S` / `⇧⌘S` | Save / Save As |
+| `⌘B` | Toggle the drafts sidebar |
+| `⇧⌘P` | Toggle markdown preview |
+| `⌘F` · `⌘G` / `⇧⌘G` | Find · next / previous match |
+| `⌘,` | Settings |
+
+**How saving works**
+
+- **Autosave** — changes are written ~400 ms after your last keystroke. There's no "unsaved" state.
+- **Drafts store** — every note is a small JSON file in the app's data directory (`~/Library/Application Support/com.byrhn.mac-notepad/drafts/`). A note appears in the sidebar as soon as it has content; empty, untouched notes are never saved.
+- **Real files, on demand** — `⌘S` writes the current draft to a `.txt`/`.md` file wherever you choose. After that, autosave keeps that file up to date too.
+- **Fresh page on launch** — opening the app always gives you a clean page; your previous notes are one click away in the sidebar.
 
 ## Build from source
 
-### Prerequisites
-
-- [Rust](https://rustup.rs) (stable)
-- [Node.js](https://nodejs.org) 18+ and [pnpm](https://pnpm.io) (`npm i -g pnpm`)
-- **macOS:** Xcode Command Line Tools (`xcode-select --install`)
-- **Linux:** the [Tauri system dependencies](https://tauri.app/start/prerequisites/#linux) (webkit2gtk, etc.)
-- **Windows:** the [Microsoft C++ Build Tools + WebView2](https://tauri.app/start/prerequisites/#windows)
-
-### Develop
+**Prerequisites:** [Rust](https://rustup.rs) (stable), [Node.js](https://nodejs.org) 18+ and [pnpm](https://pnpm.io), plus the [Tauri prerequisites](https://tauri.app/start/prerequisites/) for your OS (Xcode Command Line Tools on macOS).
 
 ```bash
 pnpm install
 pnpm tauri dev      # hot-reloading dev build
+pnpm tauri build    # release bundle → src-tauri/target/release/bundle/
+pnpm ship           # macOS: build + copy Notepad.app to /Applications
 ```
 
-### Build a release
-
-```bash
-pnpm tauri build            # bundles for the current OS
-# → src-tauri/target/release/bundle/
-```
-
-On macOS you can also install straight into `/Applications`:
-
-```bash
-pnpm ship                   # build + copy Notepad.app to /Applications
-```
-
-### Test
+**Tests:**
 
 ```bash
 pnpm test                   # Vitest — pure logic (title/preview/search/…)
@@ -80,34 +88,16 @@ cd src-tauri && cargo test  # Rust unit tests (store/serde)
 
 ```
 src/                  frontend (vanilla JS, no framework)
-  index.html          editor + panel markup
   main.js             app logic (drafts, tabs, find, settings, preview)
-  styles.css
-  lib/
-    text.js           pure helpers (unit-tested)
-    text.test.js
-    meta.js           app name + author links (edit here for the About dialog)
-src-tauri/            Rust host
-  src/lib.rs          commands (drafts store) + native menu
-  tauri.conf.json     window + bundle config
+  lib/text.js         pure helpers (unit-tested)
+  lib/meta.js         app name + author links (edit here for the About dialog)
+src-tauri/src/lib.rs  Rust host: drafts store commands + native menu
 .github/workflows/    cross-platform release CI
-```
-
-Drafts are stored as JSON under the OS app-data dir (e.g. `~/Library/Application Support/com.byrhn.mac-notepad/drafts/` on macOS).
-
-## Releasing
-
-Pushing a `v*` tag triggers the GitHub Actions workflow, which builds for macOS (Apple Silicon + Intel), Windows, and Linux and attaches the artifacts to a GitHub Release. See [.github/workflows/release.yml](.github/workflows/release.yml).
-
-```bash
-# bump versions in package.json + src-tauri/tauri.conf.json + src/lib/meta.js first
-git tag v0.1.0
-git push origin v0.1.0
 ```
 
 ## Roadmap
 
-Small things under consideration — contributions and ideas welcome:
+Small things under consideration — ideas and PRs welcome:
 
 - [ ] Status bar — line/column + word & character count
 - [ ] Reopen last closed tab (`⌘⇧T`)
@@ -117,8 +107,6 @@ Small things under consideration — contributions and ideas welcome:
 - [ ] Soft-delete — undo an accidental draft delete
 - [ ] Auto-update (Tauri updater)
 - [ ] Homebrew cask install
-
-Larger: a [CodeMirror 6](https://codemirror.net/) editor core to unlock live markdown styling, code syntax highlighting, and smooth editing of very large files.
 
 ## Author
 
