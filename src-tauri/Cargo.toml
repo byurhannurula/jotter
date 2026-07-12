@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A fast, minimal notepad with an autosaved drafts store"
 authors = ["Byurhan Nurula"]
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/byurhannurula/just-notepad"
+repository = "https://github.com/byurhannurula/jotter"
 edition = "2021"
 
 [lib]

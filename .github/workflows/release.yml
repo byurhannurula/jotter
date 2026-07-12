@@ -25,6 +25,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history + tags, so release notes can diff since the last tag
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -51,21 +53,39 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # Build release notes automatically: commits since the previous tag + install footer.
+      - name: Assemble release notes
+        id: notes
+        shell: bash
+        run: |
+          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          if [ -n "$prev" ]; then range="$prev..${GITHUB_REF_NAME}"; else range=""; fi
+          {
+            echo "### What's changed"
+            echo
+            git log --no-merges --pretty=format:'- %s (%h)' $range
+            echo
+            echo
+            echo '---'
+            echo 'These builds are **not code-signed / notarized** (no paid developer accounts):'
+            echo '- **macOS** — Gatekeeper blocks the first launch. **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Jotter.app`.'
+            echo '- **Windows** — SmartScreen: **More info → Run anyway**.'
+            echo '- **Linux** — AppImage: `chmod +x` then run; or install the `.deb`.'
+          } > notes.md
+          {
+            echo "body<<RELEASE_EOF"
+            cat notes.md
+            echo "RELEASE_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "Notepad ${{ github.ref_name }}"
-          releaseBody: |
-            Download the installer for your OS below.
-
-            These builds are **not code-signed / notarized** (no paid developer accounts), so:
-
-            - **macOS** — Gatekeeper blocks the first launch. Open **System Settings → Privacy & Security**, scroll to the "Notepad.app was blocked" message and click **Open Anyway** — or run `xattr -dr com.apple.quarantine /Applications/Notepad.app`.
-            - **Windows** — SmartScreen may warn: **More info → Run anyway**.
-            - **Linux** — AppImage: `chmod +x` then run; or install the `.deb`.
+          releaseName: "Jotter ${{ github.ref_name }}"
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

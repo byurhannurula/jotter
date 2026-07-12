@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Notepad",
+  "productName": "Jotter",
   "version": "0.1.0",
-  "identifier": "com.byrhn.mac-notepad",
+  "identifier": "com.byrhn.jotter",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",

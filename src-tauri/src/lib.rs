@@ -147,8 +147,8 @@ fn read_text_file(path: String) -> Result<String, String> {
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
-    let about = MenuItemBuilder::with_id("about", "About Notepad").build(app)?;
-    let app_menu = SubmenuBuilder::new(app, "Notepad")
+    let about = MenuItemBuilder::with_id("about", "About Jotter").build(app)?;
+    let app_menu = SubmenuBuilder::new(app, "Jotter")
         .item(&about)
         .separator()
         .services()
