@@ -356,8 +356,8 @@ body.sidebar-hidden .tabbar {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 1 1 0;
-  min-width: 88px;
+  flex: 0 1 auto; /* content-sized, so empty strip stays draggable */
+  min-width: 160px;
   height: 28px;
   max-width: 260px;
   padding: 0 6px 0 12px;
@@ -813,7 +813,6 @@ body.sidebar-hidden .tabbar {
 }
 
 .about-icon svg {
-  filter: drop-shadow(0 6px 14px rgba(10, 132, 255, 0.35));
   display: block;
 }
 
@@ -881,27 +880,48 @@ body.sidebar-hidden .tabbar {
 
 .about-links {
   display: flex;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 10px;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 12px;
+  text-align: left;
 }
 
 .about-link {
-  border: 1px solid var(--hairline);
-  background: var(--field-bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  padding: 5px 12px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
   border-radius: 8px;
+  font: inherit;
   cursor: default;
-  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+  transition: background 0.14s ease;
 }
 
 .about-link:hover {
-  background: var(--accent);
-  color: #fff;
-  border-color: transparent;
+  background: var(--field-bg);
+}
+
+.about-link .lbl {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.about-link .url {
+  flex: 0 1 auto;
+  font-size: 12px;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about-link:hover .url {
+  text-decoration: underline;
 }
 
 .about-credit {

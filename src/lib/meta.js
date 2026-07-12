@@ -6,8 +6,7 @@ export const APP = {
   tagline: "A quiet place for quick thoughts.",
   author: "Byurhan Nurula",
   links: [
-    { label: "Website", url: "https://byurhannurula.com/" },
-    { label: "X", url: "https://x.com/byurhannurula" },
+    { label: "Follow on X", url: "https://x.com/byurhannurula" },
     { label: "GitHub", url: "https://github.com/byurhannurula/just-notepad" },
   ],
 };

@@ -764,7 +764,13 @@ function initAbout() {
   for (const { label, url } of APP.links) {
     const btn = document.createElement("button");
     btn.className = "about-link";
-    btn.textContent = label;
+    const lbl = document.createElement("span");
+    lbl.className = "lbl";
+    lbl.textContent = label;
+    const shown = document.createElement("span");
+    shown.className = "url";
+    shown.textContent = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    btn.append(lbl, shown);
     btn.addEventListener("click", () => openUrl(url).catch(() => {}));
     links.append(btn);
   }
