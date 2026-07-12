@@ -169,6 +169,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItemBuilder::with_id("open", "Open…")
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
+    let quick_open = MenuItemBuilder::with_id("switcher", "Quick Open…")
+        .accelerator("CmdOrCtrl+P")
+        .build(app)?;
     let save = MenuItemBuilder::with_id("save", "Save…")
         .accelerator("CmdOrCtrl+S")
         .build(app)?;
@@ -178,17 +181,22 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let close_tab = MenuItemBuilder::with_id("close_tab", "Close Tab")
         .accelerator("CmdOrCtrl+W")
         .build(app)?;
+    let reopen_tab = MenuItemBuilder::with_id("reopen_tab", "Reopen Closed Tab")
+        .accelerator("Shift+CmdOrCtrl+T")
+        .build(app)?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new)
         .item(&new_tab)
         .separator()
         .item(&open)
+        .item(&quick_open)
         .separator()
         .item(&save)
         .item(&save_as)
         .separator()
         .item(&close_tab)
+        .item(&reopen_tab)
         .build()?;
 
     let find = MenuItemBuilder::with_id("find", "Find…")
@@ -276,6 +284,8 @@ pub fn run() {
                     | "save"
                     | "save_as"
                     | "close_tab"
+                    | "reopen_tab"
+                    | "switcher"
                     | "next_tab"
                     | "prev_tab"
                     | "find"

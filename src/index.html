@@ -70,6 +70,10 @@
           autocorrect="off"
           placeholder="Start writing…"
         ></textarea>
+        <footer id="statusbar" class="statusbar">
+          <span id="status-pos" class="status-seg"></span>
+          <span id="status-count" class="status-seg"></span>
+        </footer>
       </main>
     </div>
 
@@ -102,6 +106,21 @@
           <div class="settings-section" data-section="shortcuts"></div>
           <div class="settings-section" data-section="about"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Quick switcher (⌘P) -->
+    <div id="switcher" class="modal-backdrop switcher-backdrop" hidden>
+      <div class="switcher" role="dialog" aria-modal="true" aria-label="Quick open">
+        <input
+          id="switcher-input"
+          class="switcher-input"
+          type="text"
+          placeholder="Search drafts…"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <ul id="switcher-list" class="switcher-list"></ul>
       </div>
     </div>
 

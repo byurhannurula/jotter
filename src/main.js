@@ -35,6 +35,10 @@ const itemEls = new Map();
 let openTabs = [];
 let currentId = null;
 let searchQuery = "";
+/** @type {string[]} ids of recently-closed drafts, for ⇧⌘T */
+const closedStack = [];
+/** @type {Map<string, number>} id -> pending hard-delete timer (soft delete) */
+const pendingDelete = new Map();
 
 let editor;
 let listEl;
@@ -214,6 +218,7 @@ function renderAll() {
   renderTabs();
   renderList();
   updateWindowTitle();
+  updateStatus();
 }
 
 let lastWinTitle = "";
@@ -245,6 +250,43 @@ function focusEnd() {
   editor.setSelectionRange(end, end);
 }
 
+// --- status bar ----------------------------------------------------------
+
+let statusRaf = 0;
+/** Coalesce caret-move status updates (keyup/click/select) to one frame. */
+function queueStatus() {
+  if (statusRaf) return;
+  statusRaf = requestAnimationFrame(() => {
+    statusRaf = 0;
+    updateStatus();
+  });
+}
+
+function updateStatus() {
+  if (getSetting("statusbar") === "off") return;
+  const posEl = document.getElementById("status-pos");
+  const countEl = document.getElementById("status-count");
+  if (!posEl || !countEl) return;
+
+  const text = editor.value;
+  const trimmed = text.trim();
+  const words = trimmed ? trimmed.split(/\s+/).length : 0;
+  const chars = text.length;
+  countEl.textContent =
+    `${words} ${words === 1 ? "word" : "words"} · ` +
+    `${chars} ${chars === 1 ? "char" : "chars"}`;
+
+  if (previewTabs.has(currentId)) {
+    posEl.textContent = "Preview";
+    return;
+  }
+  const caret = editor.selectionStart;
+  const before = text.slice(0, caret);
+  const line = before.split("\n").length;
+  const col = caret - before.lastIndexOf("\n"); // 1-based (lastIndexOf -1 → col 1)
+  posEl.textContent = `Ln ${line}, Col ${col}`;
+}
+
 function refreshPreview() {
   if (!previewTabs.has(currentId) || !previewEl) return;
   const d = drafts.get(currentId);
@@ -269,6 +311,7 @@ function togglePreview() {
     previewTabs.delete(currentId);
   }
   applyView();
+  updateStatus();
   if (on) previewEl.scrollTop = 0;
   else focusEnd();
 }
@@ -355,6 +398,9 @@ async function closeTab(id) {
 
   openTabs.splice(idx, 1);
   previewTabs.delete(id);
+  // Remember meaningful drafts so ⇧⌘T can reopen them; blanks get pruned away.
+  const closed = drafts.get(id);
+  if (closed && isSaved(closed)) closedStack.push(id);
   pruneIfEmpty(id);
 
   if (openTabs.length === 0) {
@@ -378,18 +424,23 @@ function cycleTab(dir) {
   activate(openTabs[n]);
 }
 
-async function deleteDraft(id) {
-  const d = drafts.get(id);
-  if (!d) return;
-  const confirmed = await ask(
-    `Delete "${draftTitle(d)}"? This can't be undone.`,
-    { title: "Delete draft", kind: "warning" }
-  );
-  if (!confirmed) return;
+/** Reopen the most recently closed draft that still exists (⇧⌘T). */
+function reopenClosedTab() {
+  while (closedStack.length) {
+    const id = closedStack.pop();
+    if (drafts.has(id)) {
+      openInTab(id);
+      return;
+    }
+  }
+}
 
-  await invoke("delete_draft", { id }).catch((e) => console.error(e));
+/** Remove a draft from the in-memory model + UI (does not touch disk). */
+function removeDraftFromView(id) {
   drafts.delete(id);
   previewTabs.delete(id);
+  const ci = closedStack.indexOf(id);
+  if (ci !== -1) closedStack.splice(ci, 1);
   const wasOpen = openTabs.includes(id);
   openTabs = openTabs.filter((t) => t !== id);
 
@@ -406,6 +457,42 @@ async function deleteDraft(id) {
   }
   renderAll();
   if (wasOpen) focusEnd();
+}
+
+async function deleteDraft(id) {
+  const d = drafts.get(id);
+  if (!d) return;
+
+  // Confirm mode: block on a native dialog, then remove from disk immediately.
+  if (getSetting("del") === "confirm") {
+    const confirmed = await ask(
+      `Delete "${draftTitle(d)}"? This can't be undone.`,
+      { title: "Delete draft", kind: "warning" }
+    );
+    if (!confirmed) return;
+    await invoke("delete_draft", { id }).catch((e) => console.error(e));
+    removeDraftFromView(id);
+    return;
+  }
+
+  // Undo mode: remove from view now, purge from disk after a grace period.
+  removeDraftFromView(id);
+  const timer = setTimeout(() => {
+    pendingDelete.delete(id);
+    invoke("delete_draft", { id }).catch((e) => console.error(e));
+  }, 6000);
+  pendingDelete.set(id, timer);
+  showToast(`Deleted "${draftTitle(d)}"`, {
+    actionLabel: "Undo",
+    timeout: 6000,
+    onAction: () => {
+      const t = pendingDelete.get(id);
+      if (t) clearTimeout(t);
+      pendingDelete.delete(id);
+      drafts.set(id, d); // file was never removed, so the model is enough
+      renderList();
+    },
+  });
 }
 
 // Cheap per-keystroke handler. Heavy UI work is coalesced to one frame so that
@@ -430,6 +517,7 @@ function flushUi() {
   if (tabTitle) tabTitle.textContent = draftTitle(d);
 
   updateWindowTitle();
+  updateStatus();
   if (searchQuery || !itemEls.has(currentId) || isEmpty(d)) renderList();
   else refreshActiveItem();
 
@@ -524,12 +612,33 @@ function applySize(v) {
 function applyWrap(v) {
   if (editor) editor.wrap = v === "off" ? "off" : "soft";
 }
+function applyMargins(v) {
+  document.body.classList.toggle("margins-wide", v === "wide");
+}
+function applyStatusbar(v) {
+  document.body.classList.toggle("no-statusbar", v === "off");
+  updateStatus();
+}
+function applyPreviewBtn(v) {
+  document.body.classList.toggle("no-preview-btn", v === "off");
+}
+// Delete behavior is read at delete time; nothing to apply on change.
+function applyDelete() {}
 
-// Each setting renders into a section as a segmented control.
+// Each setting renders into its section. Control type is a segmented control
+// ("seg", the default) or an on/off "toggle" switch.
 const SETTINGS = {
   theme: {
     section: "general", label: "Appearance", def: "system", apply: applyTheme,
     options: [["system", "System"], ["light", "Light"], ["dark", "Dark"]],
+  },
+  del: {
+    section: "general", label: "On delete", def: "undo", apply: applyDelete,
+    options: [["undo", "Undo toast"], ["confirm", "Confirm"]],
+  },
+  previewBtn: {
+    section: "general", label: "Preview button", def: "on", apply: applyPreviewBtn,
+    control: "toggle",
   },
   font: {
     section: "editor", label: "Font", def: "system", apply: applyFont,
@@ -543,12 +652,20 @@ const SETTINGS = {
     section: "editor", label: "Word wrap", def: "on", apply: applyWrap,
     options: [["on", "On"], ["off", "Off"]],
   },
+  margins: {
+    section: "editor", label: "Margins", def: "cozy", apply: applyMargins,
+    options: [["cozy", "Cozy"], ["wide", "Wide"]],
+  },
+  statusbar: {
+    section: "editor", label: "Status bar", def: "on", apply: applyStatusbar,
+    control: "toggle",
+  },
 };
 
 const GITHUB = APP.links.find((l) => /github\.com/.test(l.url))?.url || "";
 
 const SHORTCUTS = [
-  ["File", [["⌘N / ⌘T", "New tab"], ["⌘O", "Open file"], ["⌘S / ⇧⌘S", "Save / Save As"], ["⌘W", "Close tab"]]],
+  ["File", [["⌘N / ⌘T", "New tab"], ["⌘O", "Open file"], ["⌘P", "Quick open"], ["⌘S / ⇧⌘S", "Save / Save As"], ["⌘W", "Close tab"], ["⇧⌘T", "Reopen closed tab"]]],
   ["Edit", [["⌘Z / ⇧⌘Z", "Undo / Redo"], ["⌘F", "Find"], ["⌘G / ⇧⌘G", "Find next / previous"]]],
   ["View", [["⌘B", "Toggle sidebar"], ["⇧⌘P", "Toggle markdown preview"], ["⌘,", "Settings"]]],
   ["Tabs", [["⌃Tab / ⌃⇧Tab", "Next / previous tab"]]],
@@ -562,13 +679,17 @@ function getSetting(name) {
 function setSetting(name, val) {
   localStorage.setItem(`set-${name}`, val);
   SETTINGS[name].apply(val);
-  markSeg(name, val);
+  markControl(name, val);
 }
-function markSeg(name, val) {
-  const group = document.getElementById(`set-${name}`);
-  if (!group) return;
-  for (const btn of group.querySelectorAll("button")) {
-    btn.classList.toggle("active", btn.dataset.val === String(val));
+function markControl(name, val) {
+  const el = document.getElementById(`set-${name}`);
+  if (!el) return;
+  if (SETTINGS[name].control === "toggle") {
+    el.classList.toggle("on", String(val) === "on");
+  } else {
+    for (const btn of el.querySelectorAll("button")) {
+      btn.classList.toggle("active", btn.dataset.val === String(val));
+    }
   }
 }
 function applyAllSettings() {
@@ -586,17 +707,30 @@ function settingRow(name) {
   const label = document.createElement("span");
   label.className = "setting-label";
   label.textContent = cfg.label;
-  const seg = document.createElement("div");
-  seg.className = "seg";
-  seg.id = `set-${name}`;
-  for (const [val, text] of cfg.options) {
-    const b = document.createElement("button");
-    b.dataset.val = val;
-    b.textContent = text;
-    b.addEventListener("click", () => setSetting(name, val));
-    seg.append(b);
+  row.append(label);
+
+  if (cfg.control === "toggle") {
+    const sw = document.createElement("button");
+    sw.className = "switch interactive";
+    sw.id = `set-${name}`;
+    sw.setAttribute("role", "switch");
+    sw.addEventListener("click", () =>
+      setSetting(name, getSetting(name) === "on" ? "off" : "on")
+    );
+    row.append(sw);
+  } else {
+    const seg = document.createElement("div");
+    seg.className = "seg";
+    seg.id = `set-${name}`;
+    for (const [val, text] of cfg.options) {
+      const b = document.createElement("button");
+      b.dataset.val = val;
+      b.textContent = text;
+      b.addEventListener("click", () => setSetting(name, val));
+      seg.append(b);
+    }
+    row.append(seg);
   }
-  row.append(label, seg);
   return row;
 }
 
@@ -744,7 +878,7 @@ function initSettings() {
       sectionEl(sec).append(cards[sec]);
     }
     cards[sec].append(settingRow(name));
-    markSeg(name, getSetting(name));
+    markControl(name, getSetting(name));
   }
   renderShortcutsSection();
   renderAboutSection();
@@ -785,6 +919,100 @@ function showToast(message, { actionLabel, onAction, timeout = 5000 } = {}) {
   host.append(toast);
   timer = setTimeout(dismiss, timeout);
   return dismiss;
+}
+
+// --- quick switcher (⌘P) -------------------------------------------------
+
+let switcherResults = [];
+let switcherSel = 0;
+
+function switcherMatches(query) {
+  const q = query.trim().toLowerCase();
+  return orderedDrafts().filter(
+    (d) =>
+      isSaved(d) &&
+      (!q ||
+        draftTitle(d).toLowerCase().includes(q) ||
+        d.content.toLowerCase().includes(q))
+  );
+}
+
+function renderSwitcher(query) {
+  const list = document.getElementById("switcher-list");
+  switcherResults = switcherMatches(query);
+  switcherSel = 0;
+  list.replaceChildren();
+
+  if (switcherResults.length === 0) {
+    const li = document.createElement("li");
+    li.className = "switcher-empty";
+    li.textContent = "No matching drafts";
+    list.append(li);
+    return;
+  }
+  switcherResults.forEach((d, i) => {
+    const li = document.createElement("li");
+    li.className = "switcher-item" + (i === 0 ? " sel" : "");
+    li.dataset.id = d.id;
+    const t = document.createElement("div");
+    t.className = "s-title";
+    t.textContent = draftTitle(d);
+    const s = document.createElement("div");
+    s.className = "s-sub";
+    s.textContent = `${draftPreview(d) || "No additional text"} · ${relTime(
+      d.updated_at
+    )}`;
+    li.append(t, s);
+    li.addEventListener("click", () => chooseSwitcher(i));
+    li.addEventListener("mousemove", () => setSwitcherSel(i));
+    list.append(li);
+  });
+}
+
+function setSwitcherSel(i) {
+  const items = document.querySelectorAll("#switcher-list .switcher-item");
+  if (!items.length) return;
+  switcherSel = (i + items.length) % items.length;
+  items.forEach((el, k) => el.classList.toggle("sel", k === switcherSel));
+  items[switcherSel].scrollIntoView({ block: "nearest" });
+}
+
+function chooseSwitcher(i) {
+  const d = switcherResults[i];
+  closeModal("switcher");
+  if (d) openInTab(d.id);
+}
+
+function openSwitcher() {
+  if (switcherMatches("").length === 0) {
+    showToast("No drafts to open yet");
+    return;
+  }
+  const input = document.getElementById("switcher-input");
+  input.value = "";
+  openModal("switcher");
+  renderSwitcher("");
+  input.focus();
+}
+
+function initSwitcher() {
+  const input = document.getElementById("switcher-input");
+  input.addEventListener("input", () => renderSwitcher(input.value));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSwitcherSel(switcherSel + 1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSwitcherSel(switcherSel - 1);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      chooseSwitcher(switcherSel);
+    } else if (e.key === "Escape") {
+      closeModal("switcher");
+    }
+  });
+  bindBackdrop("switcher");
 }
 
 // --- find & replace ------------------------------------------------------
@@ -983,6 +1211,7 @@ async function init() {
   applyAllSettings();
   initSettings();
   initFind();
+  initSwitcher();
   bindBackdrop("settings");
 
   const list = await invoke("init_store");
@@ -997,6 +1226,9 @@ async function init() {
   renderAll();
 
   editor.addEventListener("input", onInput);
+  for (const ev of ["keyup", "click", "select"]) {
+    editor.addEventListener(ev, queueStatus);
+  }
   document.getElementById("new-draft").addEventListener("click", newTab);
   document.getElementById("new-tab").addEventListener("click", newTab);
   document.getElementById("preview-toggle").addEventListener("click", togglePreview);
@@ -1007,7 +1239,8 @@ async function init() {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (!document.getElementById("settings").hidden) closeModal("settings");
+      if (!document.getElementById("switcher").hidden) closeModal("switcher");
+      else if (!document.getElementById("settings").hidden) closeModal("settings");
       else if (find.open) closeFind();
       else if (document.activeElement === searchEl) {
         searchEl.value = "";
@@ -1025,6 +1258,8 @@ async function init() {
       case "save": save(); break;
       case "save_as": saveAs(); break;
       case "close_tab": closeTab(currentId); break;
+      case "reopen_tab": reopenClosedTab(); break;
+      case "switcher": openSwitcher(); break;
       case "next_tab": cycleTab(1); break;
       case "prev_tab": cycleTab(-1); break;
       case "find": openFind(false); break;

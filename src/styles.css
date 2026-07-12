@@ -625,6 +625,43 @@ body.sidebar-hidden .tabbar {
   margin-top: 0;
 }
 
+/* ---- Editor margins (Cozy / Wide) ---- */
+
+body.margins-wide .editor,
+body.margins-wide .md-view {
+  max-width: 760px;
+  margin-inline: auto;
+}
+
+/* ---- Status bar ---- */
+
+.statusbar {
+  flex: 0 0 auto;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  border-top: 1px solid var(--hairline);
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.status-seg {
+  white-space: nowrap;
+}
+
+body.no-statusbar .statusbar {
+  display: none;
+}
+
+body.no-preview-btn #preview-toggle {
+  display: none;
+}
+
 /* ---- Find & Replace bar ---- */
 
 .findbar {
@@ -1244,6 +1281,9 @@ body.sidebar-hidden .tabbar {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
   transition: transform 0.16s ease;
 }
+.switch.interactive {
+  opacity: 1;
+}
 .switch.on {
   background: var(--accent);
   opacity: 1;
@@ -1334,6 +1374,87 @@ body.sidebar-hidden .tabbar {
     opacity: 0;
     transform: translateY(8px);
   }
+}
+
+/* ---- Quick switcher (⌘P) ---- */
+
+.switcher-backdrop {
+  align-items: flex-start;
+}
+
+.switcher {
+  margin-top: 12vh;
+  width: 520px;
+  max-width: 92vw;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  animation: card-in 0.2s var(--ease);
+}
+
+.modal-backdrop.closing .switcher {
+  animation: card-out 0.16s ease forwards;
+}
+
+.switcher-input {
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  padding: 14px 16px;
+  outline: none;
+}
+
+.switcher-input::placeholder {
+  color: var(--faint);
+}
+
+.switcher-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+}
+
+.switcher-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: default;
+}
+
+.switcher-item .s-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.switcher-item .s-sub {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.switcher-item.sel {
+  background: var(--item-active);
+}
+
+.switcher-empty {
+  padding: 18px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--faint);
 }
 
 @media (prefers-reduced-motion: reduce) {
