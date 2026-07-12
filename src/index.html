@@ -70,76 +70,61 @@
           autocorrect="off"
           placeholder="Start writing…"
         ></textarea>
+        <footer id="statusbar" class="statusbar">
+          <span id="status-pos" class="status-seg"></span>
+          <span id="status-count" class="status-seg"></span>
+        </footer>
       </main>
     </div>
 
-    <!-- About -->
-    <div id="about" class="modal-backdrop" hidden>
-      <div class="about-card" role="dialog" aria-modal="true" aria-label="About Notepad">
-        <button id="about-close" class="modal-close" aria-label="Close">×</button>
-        <button id="about-icon" class="about-icon" aria-label="Notepad">
-          <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
-            <rect x="12" y="8" width="40" height="48" rx="7" fill="var(--accent)"/>
-            <rect x="12" y="8" width="40" height="13" rx="7" fill="var(--accent-hi)"/>
-            <g stroke="rgba(255,255,255,0.92)" stroke-width="3" stroke-linecap="round">
-              <path d="M21 32h22"/><path d="M21 40h22"/><path d="M21 48h13"/>
-            </g>
-          </svg>
-        </button>
-        <div id="about-name" class="about-name">Notepad</div>
-        <div id="about-version" class="about-version">Version 0.1.0</div>
-        <div class="about-tagline">A quiet place for quick thoughts.</div>
-        <div id="about-egg" class="about-egg" hidden>
-          <p>You found the quiet room.</p>
-          <p>Made on a Sunday, for the thoughts that couldn't wait —<br />no cloud, no account, no nonsense.</p>
-          <p class="sig">↳ keep writing.</p>
+    <!-- Settings (rail + sections; About lives here too) -->
+    <div id="settings" class="modal-backdrop" hidden>
+      <div class="settings-window" role="dialog" aria-modal="true" aria-label="Settings">
+        <nav class="settings-rail">
+          <div class="rail-title">Settings</div>
+          <button class="rail-item" data-section="general">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><path d="M2 5h6M11 5h3M2 11h3M8 11h6"/><circle cx="9.5" cy="5" r="1.6"/><circle cx="6.5" cy="11" r="1.6"/></svg>
+            <span>General</span>
+          </button>
+          <button class="rail-item" data-section="editor">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 2.5l3 3L6 13l-3.5.5.5-3.5z"/></svg>
+            <span>Editor</span>
+          </button>
+          <button class="rail-item" data-section="shortcuts">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8" rx="1.5"/><path d="M4 7h0M6.5 7h0M9 7h0M11.5 7h0M5 9.5h6"/></svg>
+            <span>Shortcuts</span>
+          </button>
+          <button class="rail-item" data-section="about">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.4v3.1" stroke-linecap="round"/><circle cx="8" cy="5.1" r="0.4" fill="currentColor" stroke="none"/></svg>
+            <span>About</span>
+          </button>
+        </nav>
+        <div class="settings-content">
+          <button id="settings-close" class="modal-close" aria-label="Close">×</button>
+          <div class="settings-section" data-section="general"></div>
+          <div class="settings-section" data-section="editor"></div>
+          <div class="settings-section" data-section="shortcuts"></div>
+          <div class="settings-section" data-section="about"></div>
         </div>
-        <div id="about-by" class="about-by"></div>
-        <div id="about-links" class="about-links"></div>
-        <div class="about-credit">No cloud · No account · Your notes stay yours.</div>
       </div>
     </div>
 
-    <!-- Settings -->
-    <div id="settings" class="modal-backdrop" hidden>
-      <div class="sheet" role="dialog" aria-modal="true" aria-label="Settings">
-        <div class="sheet-head">
-          <span class="sheet-title">Settings</span>
-          <button id="settings-close" class="modal-close" aria-label="Close">×</button>
-        </div>
-        <div class="setting-row">
-          <span class="setting-label">Appearance</span>
-          <div class="seg" id="set-theme">
-            <button data-val="system">System</button>
-            <button data-val="light">Light</button>
-            <button data-val="dark">Dark</button>
-          </div>
-        </div>
-        <div class="setting-row">
-          <span class="setting-label">Font</span>
-          <div class="seg" id="set-font">
-            <button data-val="system">System</button>
-            <button data-val="serif">Serif</button>
-            <button data-val="mono">Mono</button>
-            <button data-val="rounded">Rounded</button>
-          </div>
-        </div>
-        <div class="setting-row">
-          <span class="setting-label">Text size</span>
-          <div class="seg" id="set-size">
-            <button data-val="14">Small</button>
-            <button data-val="15.5">Medium</button>
-            <button data-val="17">Large</button>
-          </div>
-        </div>
-        <div class="setting-row">
-          <span class="setting-label">Word wrap</span>
-          <div class="seg" id="set-wrap">
-            <button data-val="on">On</button>
-            <button data-val="off">Off</button>
-          </div>
-        </div>
+    <!-- Quick switcher (⌘P) -->
+    <div id="switcher" class="modal-backdrop switcher-backdrop" hidden>
+      <div class="switcher" role="dialog" aria-modal="true" aria-label="Quick open">
+        <input
+          id="switcher-input"
+          class="switcher-input"
+          type="text"
+          placeholder="Search drafts…"
+          spellcheck="false"
+          autocomplete="off"
+        />
+        <ul id="switcher-list" class="switcher-list"></ul>
       </div>
     </div>
+
+    <!-- Toast -->
+    <div id="toast-host" class="toast-host" aria-live="polite"></div>
   </body>
 </html>
