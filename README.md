@@ -120,10 +120,6 @@ Small things under consideration — contributions and ideas welcome:
 
 Larger: a [CodeMirror 6](https://codemirror.net/) editor core to unlock live markdown styling, code syntax highlighting, and smooth editing of very large files.
 
-## License
-
-[AGPL-3.0-or-later](LICENSE). You're free to use, study, modify, and share it — but derivative works (including network-hosted ones) must also be open under the AGPL. In short: build on it, don't repackage it as a closed product.
-
 ## Author
 
-Made by **Byurhan Nurula** — [website](https://byurhannurula.com/) · [X](https://x.com/byurhannurula) · [GitHub](https://github.com/byurhannurula)
+Made by **Byurhan Nurula** — [website](https://byurhannurula.com/) · [X](https://x.com/byurhannurula)

@@ -356,8 +356,8 @@ body.sidebar-hidden .tabbar {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 0 1 auto; /* content-sized, so empty strip stays draggable */
-  min-width: 160px;
+  flex: 1 1 0;
+  min-width: 88px;
   height: 28px;
   max-width: 260px;
   padding: 0 6px 0 12px;
