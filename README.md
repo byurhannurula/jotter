@@ -17,10 +17,35 @@ Open it and start typing. No "where do you want to save this?" dialog, no accoun
 
 Built with [Tauri 2](https://tauri.app) (Rust) + vanilla JS. Tiny bundle, native WebKit, instant startup.
 
-![Jotter](docs/screenshot.png)
+<!-- ![Jotter](docs/screenshot.png) -->
 
 > [!NOTE]
 > Jotter is built for my **personal use on macOS**. Windows and Linux binaries are produced by CI but are **not tested** — they may work, but no promises. Bug reports and PRs are welcome.
+
+## Install
+
+### Download
+
+Or grab the latest build from the [**Releases**](https://github.com/byurhannurula/jotter/releases/latest) page — macOS `.dmg`, Windows `.exe`/`.msi`, Linux `.AppImage`/`.deb`/`.rpm`.
+
+### Homebrew
+Install via the Homebrew tap:
+```bash
+brew install --cask byurhannurula/tap/jotter
+```
+
+Update later with:
+```bash
+brew upgrade --cask jotter
+```
+
+### First launch
+
+The app isn't code‑signed / notarized (no paid developer accounts), so the OS warns on first launch **regardless of install method**:
+
+- **macOS** — Gatekeeper blocks it. Open **System Settings → Privacy & Security**, scroll to the *"Jotter.app was blocked"* message, and click **Open Anyway** (authenticate, then confirm). It's trusted from then on. Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/Jotter.app`. _(On macOS 14 and earlier you can instead right‑click the app → Open.)_
+- **Windows** — SmartScreen may warn: **More info → Run anyway**.
+- **Linux** — AppImage: `chmod +x Jotter*.AppImage` then run; or install the `.deb`.
 
 ## Features
 
@@ -33,18 +58,10 @@ Built with [Tauri 2](https://tauri.app) (Rust) + vanilla JS. Tiny bundle, native
 - **Status bar** — line/column + word & character count (toggleable)
 - **Soft‑delete** — deleting a draft leaves an Undo, so nothing goes by accident
 - **Settings** — a sectioned surface: theme, font, text size, word wrap, editor margins (Cozy/Wide), and a full keyboard‑shortcut reference. Every piece of chrome is show/hide‑able
-- **Native feel** — overlay titlebar, light/dark, remembers window size
+- **Native feel** — overlay titlebar, light/dark, sizes to your display on first run then remembers your size
 - Small (~9 MB), fast, and everything stays on your machine
 
-## Install
 
-Download the latest build from the [**Releases**](https://github.com/byurhannurula/jotter/releases/latest) page.
-
-Because the app isn't code‑signed / notarized (no paid developer accounts), the OS will warn on first launch:
-
-- **macOS** — Gatekeeper blocks it. Open **System Settings → Privacy & Security**, scroll to the *"Jotter.app was blocked"* message, and click **Open Anyway** (authenticate, then confirm). It's trusted from then on. Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/Jotter.app`. _(On macOS 14 and earlier you can instead right‑click the app → Open.)_
-- **Windows** — SmartScreen may warn: **More info → Run anyway**.
-- **Linux** — AppImage: `chmod +x Jotter*.AppImage` then run; or install the `.deb`.
 
 ## Usage
 
@@ -77,6 +94,17 @@ pnpm test                   # Vitest — pure logic (title/preview/search/…)
 cd src-tauri && cargo test  # Rust unit tests (store/serde)
 ```
 
+**Releasing** (maintainer):
+
+```bash
+pnpm release patch   # 0.2.0 → 0.2.1
+pnpm release minor   # 0.2.0 → 0.3.0
+pnpm release major   # 0.2.0 → 1.0.0
+pnpm release patch --dry-run   # preview the bump, change nothing
+```
+
+Bumps the version in all four files (`package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src/lib/meta.js`), runs the test suites, then commits, tags `vX.Y.Z`, and pushes. The tag push triggers CI, which builds installers for macOS/Windows/Linux and drafts a GitHub Release; publishing that draft updates the Homebrew tap automatically. Runs only from a clean `main`.
+
 ## Project structure
 
 ```
@@ -97,14 +125,19 @@ Shipped in v0.2:
 - [x] Quick draft switcher (`⌘P`)
 - [x] Configurable editor margins (Cozy / Wide)
 - [x] Soft-delete — undo an accidental draft delete
+- [x] Homebrew install + one‑command releases
 
 Under consideration — ideas and PRs welcome:
 
-- [ ] Optional cloud sync — back up drafts across devices (self-hostable, opt-in)
-- [ ] Export / "Reveal in Finder" for a draft
-- [ ] Auto-update (Tauri updater)
-- [ ] Homebrew cask install
+- [ ] Optional cloud sync — back up & sync drafts across devices (self‑hostable Worker + R2, opt‑in)
+- [ ] Read-only sharing — a private link that renders a note as a clean web page
+- [ ] Edit history — browse and restore earlier versions of a draft
+- [ ] Auto-update (Tauri updater) — in‑app "check for updates"
+- [ ] Right-click actions — Export (md/txt/html), Reveal in Finder, Copy path/name
+- [ ] Recent-tab switching — Alt+Tab-style, most-recently-used order
+- [ ] Split view — open two notes side by side
+- [ ] Unified sidebar — show saved files alongside drafts (drop ones that no longer exist)
 
 ## Author
 
-Made by **Byurhan Nurula** — [website](https://byurhannurula.com/) · [X](https://x.com/byurhannurula)
+Made by **Byurhan Nurula** — [Website](https://byurhannurula.com/) · [X](https://x.com/byurhannurula)
