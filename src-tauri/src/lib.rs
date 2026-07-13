@@ -238,12 +238,12 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .item(&settings)
         .build()?;
 
-    let prev_tab = MenuItemBuilder::with_id("prev_tab", "Show Previous Tab")
-        .accelerator("Control+Shift+Tab")
-        .build(app)?;
-    let next_tab = MenuItemBuilder::with_id("next_tab", "Show Next Tab")
-        .accelerator("Control+Tab")
-        .build(app)?;
+    // No accelerators here: Tab-based menu accelerators (Control+Tab) are
+    // unreliable on macOS — AppKit swallows the key before the menu acts, so the
+    // shortcut is handled in the webview (see the keydown handler in main.js).
+    // Menu items stay for discoverability / click access.
+    let prev_tab = MenuItemBuilder::with_id("prev_tab", "Show Previous Tab").build(app)?;
+    let next_tab = MenuItemBuilder::with_id("next_tab", "Show Next Tab").build(app)?;
     let window_menu = SubmenuBuilder::new(app, "Window")
         .minimize()
         .fullscreen()
@@ -266,14 +266,88 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Persisted window size, in **logical** pixels.
+#[derive(Serialize, Deserialize, Clone, Copy)]
+struct WindowGeom {
+    w: f64,
+    h: f64,
+}
+
+// Keep in sync with `minWidth`/`minHeight` in tauri.conf.json.
+const MIN_W: f64 = 480.0;
+const MIN_H: f64 = 320.0;
+
+fn geom_file(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("window.json"))
+}
+
+/// Size the window to the saved size (or a monitor-proportional default on first
+/// run), clamp it to `[min, monitor]`, then center and show it.
+///
+/// Everything is in **logical** pixels so the save→restore round-trip is
+/// idempotent (`L → set_size(L) → inner_size = L·scale → /scale = L`). That's what
+/// avoids the progressive-shrink bug `tauri-plugin-window-state` had on HiDPI
+/// displays, where a physical/logical mismatch lost pixels every cycle.
+fn restore_window(app: &AppHandle) {
+    use tauri::{LogicalSize, PhysicalSize};
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+
+    // Current monitor's logical size (generous fallback if it can't be read).
+    let (mw, mh) = match win.current_monitor() {
+        Ok(Some(m)) => {
+            let s = m.scale_factor();
+            let PhysicalSize { width, height } = *m.size();
+            (width as f64 / s, height as f64 / s)
+        }
+        _ => (f64::MAX, f64::MAX),
+    };
+
+    // Saved size, else a comfortable fraction of the monitor.
+    let saved = geom_file(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<WindowGeom>(&s).ok());
+    let (mut w, mut h) = match saved {
+        Some(g) => (g.w, g.h),
+        None => (
+            (mw * 0.68).clamp(760.0, 1280.0),
+            (mh * 0.80).clamp(560.0, 900.0),
+        ),
+    };
+
+    // Never tiny, never larger than the screen.
+    w = w.clamp(MIN_W, mw.max(MIN_W));
+    h = h.clamp(MIN_H, mh.max(MIN_H));
+
+    let _ = win.set_size(LogicalSize::new(w, h));
+    let _ = win.center();
+    let _ = win.show();
+}
+
+/// Save the window's current size (logical) so the next launch restores it.
+fn save_window(win: &tauri::WebviewWindow) {
+    let scale = win.scale_factor().unwrap_or(1.0);
+    if let Ok(size) = win.inner_size() {
+        let geom = WindowGeom {
+            w: size.width as f64 / scale,
+            h: size.height as f64 / scale,
+        };
+        if let (Ok(path), Ok(json)) = (geom_file(win.app_handle()), serde_json::to_string(&geom)) {
+            let _ = fs::write(path, json);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             build_menu(app.handle())?;
+            restore_window(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -307,8 +381,27 @@ pub fn run() {
             delete_draft,
             read_text_file
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| match event {
+            // Persist the window size when it closes or the app quits, so the next
+            // launch restores it (see restore_window / save_window).
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { .. },
+                ..
+            } => {
+                if let Some(win) = app_handle.get_webview_window(&label) {
+                    save_window(&win);
+                }
+            }
+            tauri::RunEvent::ExitRequested { .. } => {
+                if let Some(win) = app_handle.get_webview_window("main") {
+                    save_window(&win);
+                }
+            }
+            _ => {}
+        });
 }
 
 #[cfg(test)]

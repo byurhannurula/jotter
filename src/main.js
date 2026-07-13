@@ -1241,6 +1241,15 @@ async function init() {
     renderList();
   });
 
+  // Tab cycling lives here, not on a native menu accelerator: Tab-based
+  // accelerators (Control+Tab) don't fire reliably on macOS.
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
+      e.preventDefault();
+      cycleTab(e.shiftKey ? -1 : 1);
+    }
+  });
+
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       if (!document.getElementById("switcher").hidden) closeModal("switcher");
