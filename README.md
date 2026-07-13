@@ -118,7 +118,7 @@ src-tauri/src/lib.rs  Rust host: drafts store commands + native menu
 
 ## Roadmap
 
-Shipped in v0.2:
+Shipped:
 
 - [x] Status bar — line/column + word & character count
 - [x] Reopen last closed tab (`⌘⇧T`)
@@ -126,17 +126,16 @@ Shipped in v0.2:
 - [x] Configurable editor margins (Cozy / Wide)
 - [x] Soft-delete — undo an accidental draft delete
 - [x] Homebrew install + one‑command releases
+- [x] Right-click actions — Rename, Copy Path, Reveal in Finder, Export (md/txt/html)
+- [x] Unified sidebar — saved files alongside drafts
+- [x] In-app auto-update (Tauri updater)
 
 Under consideration — ideas and PRs welcome:
 
 - [ ] Optional cloud sync — back up & sync drafts across devices (self‑hostable Worker + R2, opt‑in)
 - [ ] Read-only sharing — a private link that renders a note as a clean web page
 - [ ] Edit history — browse and restore earlier versions of a draft
-- [ ] Auto-update (Tauri updater) — in‑app "check for updates"
-- [ ] Right-click actions — Export (md/txt/html), Reveal in Finder, Copy path/name
-- [ ] Recent-tab switching — Alt+Tab-style, most-recently-used order
 - [ ] Split view — open two notes side by side
-- [ ] Unified sidebar — show saved files alongside drafts (drop ones that no longer exist)
 
 ## Author
 
