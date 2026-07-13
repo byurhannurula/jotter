@@ -9,8 +9,7 @@ Vite** — no frontend framework.
 
 - **Primary target:** macOS. Windows/Linux binaries are produced by CI but untested.
 - **productName:** `Jotter` · **bundle id:** `com.byrhn.jotter`
-- **Rust crate:** `mac-notepad` (lib `mac_notepad_lib`) — the folder/crate name predates
-  the "Jotter" rename; only the product/bundle are branded.
+- **Rust crate:** `jotter` (lib `jotter_lib`). The `src-tauri` folder still holds the crate.
 - **License:** AGPL-3.0-or-later.
 
 ## Build & run

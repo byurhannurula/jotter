@@ -1,5 +1,5 @@
 [package]
-name = "mac-notepad"
+name = "jotter"
 version = "0.2.5"
 description = "A fast, minimal notepad with an autosaved drafts store"
 authors = ["Byurhan Nurula"]
@@ -10,7 +10,7 @@ edition = "2021"
 [lib]
 # The `_lib` suffix keeps the lib name unique so it doesn't conflict with the
 # bin name (an issue on Windows: rust-lang/cargo#8519).
-name = "mac_notepad_lib"
+name = "jotter_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -23,6 +23,10 @@ tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Native HTTP client for cloud-sync (talks to the self-hosted Worker). rustls-tls
+# avoids OpenSSL build friction across macOS/Windows/Linux. reqwest's async client
+# runs on Tauri v2's built-in tokio runtime, so no direct tokio dep is needed.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
