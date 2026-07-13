@@ -26,10 +26,13 @@ Built with [Tauri 2](https://tauri.app) (Rust) + vanilla JS. Tiny bundle, native
 
 - **Type instantly on launch** — a fresh page every time; past notes live in the sidebar
 - **Autosaved drafts** — nothing is ever lost; browse and search them in the sidebar (`⌘B`)
-- **Tabs** — VSCode‑style; `⌘T` new, `⌘W` close, `⌃Tab` to cycle
+- **Tabs** — VSCode‑style; `⌘T` new, `⌘W` close, `⌃Tab` to cycle, `⌘⇧T` to reopen a closed one
+- **Quick switcher** (`⌘P`) — jump to any draft by name or content
 - **Markdown preview** — per‑tab Edit ⇄ Preview toggle (`⇧⌘P`)
 - **Find & Replace** (`⌘F`)
-- **Settings** — theme (system/light/dark), font (system/serif/mono/rounded), text size, word wrap
+- **Status bar** — line/column + word & character count (toggleable)
+- **Soft‑delete** — deleting a draft leaves an Undo, so nothing goes by accident
+- **Settings** — a sectioned surface: theme, font, text size, word wrap, editor margins (Cozy/Wide), and a full keyboard‑shortcut reference. Every piece of chrome is show/hide‑able
 - **Native feel** — overlay titlebar, light/dark, remembers window size
 - Small (~9 MB), fast, and everything stays on your machine
 
@@ -47,17 +50,7 @@ Because the app isn't code‑signed / notarized (no paid developer accounts), th
 
 Open the app and just type — the current note autosaves as you go. Use the sidebar to revisit past notes and tabs to keep a few open at once.
 
-| Shortcut | Action |
-| --- | --- |
-| `⌘N` / `⌘T` | New tab |
-| `⌘W` | Close tab |
-| `⌃Tab` / `⌃⇧Tab` | Next / previous tab |
-| `⌘O` | Open a file into a new tab |
-| `⌘S` / `⇧⌘S` | Save / Save As |
-| `⌘B` | Toggle the drafts sidebar |
-| `⇧⌘P` | Toggle markdown preview |
-| `⌘F` · `⌘G` / `⇧⌘G` | Find · next / previous match |
-| `⌘,` | Settings |
+The full keyboard-shortcut reference lives in the app: **Settings → Shortcuts** (`⌘,`).
 
 **How saving works**
 
@@ -97,14 +90,18 @@ src-tauri/src/lib.rs  Rust host: drafts store commands + native menu
 
 ## Roadmap
 
-Small things under consideration — ideas and PRs welcome:
+Shipped in v0.2:
 
-- [ ] Status bar — line/column + word & character count
-- [ ] Reopen last closed tab (`⌘⇧T`)
-- [ ] Quick draft switcher (`⌘P`)
+- [x] Status bar — line/column + word & character count
+- [x] Reopen last closed tab (`⌘⇧T`)
+- [x] Quick draft switcher (`⌘P`)
+- [x] Configurable editor margins (Cozy / Wide)
+- [x] Soft-delete — undo an accidental draft delete
+
+Under consideration — ideas and PRs welcome:
+
+- [ ] Optional cloud sync — back up drafts across devices (self-hostable, opt-in)
 - [ ] Export / "Reveal in Finder" for a draft
-- [ ] Configurable editor margins (Cozy / Wide)
-- [ ] Soft-delete — undo an accidental draft delete
 - [ ] Auto-update (Tauri updater)
 - [ ] Homebrew cask install
 
