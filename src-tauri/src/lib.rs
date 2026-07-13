@@ -34,6 +34,15 @@ fn is_orphan(d: &Draft) -> bool {
     d.content.trim().is_empty() && d.file_path.is_none()
 }
 
+/// A draft backed by a file whose file has since disappeared (deleted or moved).
+/// Such drafts are hidden from the sidebar but their store entry is kept, so a
+/// remounted drive or a restored file brings them back on the next launch.
+fn file_gone(d: &Draft) -> bool {
+    d.file_path
+        .as_deref()
+        .is_some_and(|p| !std::path::Path::new(p).exists())
+}
+
 fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -83,15 +92,16 @@ fn write_draft(app: &AppHandle, draft: &Draft) -> Result<(), String> {
 fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
     let mut drafts = read_all_drafts(&app)?;
 
-    // Prune empty, unnamed orphans (e.g. blanks left by older versions).
+    // Prune empty, unnamed orphans (delete them), and hide drafts whose backing
+    // file is gone (keep the store entry so they can come back).
     drafts.retain(|d| {
-        let empty = is_orphan(d);
-        if empty {
+        if is_orphan(d) {
             if let Ok(p) = draft_file(&app, &d.id) {
                 let _ = fs::remove_file(p);
             }
+            return false;
         }
-        !empty
+        !file_gone(d)
     });
 
     if drafts.is_empty() {
@@ -352,7 +362,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
             build_menu(app.handle())?;
             restore_window(app.handle());
             Ok(())
@@ -429,6 +443,12 @@ mod tests {
         assert!(is_orphan(&draft("   \n\t", None)));
         assert!(!is_orphan(&draft("", Some("/tmp/a.txt")))); // named counts
         assert!(!is_orphan(&draft("hello", None))); // has text
+    }
+
+    #[test]
+    fn file_gone_flags_missing_backing_files() {
+        assert!(file_gone(&draft("note", Some("/no/such/path-xyz-123.txt"))));
+        assert!(!file_gone(&draft("note", None))); // unsaved draft isn't "gone"
     }
 
     #[test]

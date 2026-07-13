@@ -7,6 +7,8 @@ import {
   save as saveDialog,
 } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { check as checkUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import MarkdownIt from "markdown-it";
 import {
   baseName,
@@ -362,6 +364,17 @@ async function activate(id) {
   await flush();
   const d = drafts.get(id);
   if (!d) return;
+  // A draft backed by a real file reads from disk, so external edits show and a
+  // vanished file is caught (and dropped from the sidebar) at open time.
+  if (d.file_path) {
+    try {
+      d.content = await invoke("read_text_file", { path: d.file_path });
+    } catch {
+      showToast(`"${draftTitle(d)}" is no longer on disk`);
+      removeDraftFromView(id);
+      return;
+    }
+  }
   currentId = id;
   editor.value = d.content;
   renderAll();
@@ -667,8 +680,6 @@ const SETTINGS = {
   },
 };
 
-const GITHUB = APP.links.find((l) => /github\.com/.test(l.url))?.url || "";
-
 const SHORTCUTS = [
   ["File", [["⌘N / ⌘T", "New tab"], ["⌘O", "Open file"], ["⌘P", "Quick open"], ["⌘S / ⇧⌘S", "Save / Save As"], ["⌘W", "Close tab"], ["⇧⌘T", "Reopen closed tab"]]],
   ["Edit", [["⌘Z / ⇧⌘Z", "Undo / Redo"], ["⌘F", "Find"], ["⌘G / ⇧⌘G", "Find next / previous"]]],
@@ -784,6 +795,51 @@ function renderShortcutsSection() {
   }
 }
 
+// --- auto-update ---------------------------------------------------------
+// Inert until the app is configured with a real signer public key + signed
+// release artifacts; until then check() just errors and we fail quietly.
+
+function autoUpdateOn() {
+  return localStorage.getItem("set-autoupdate") !== "off"; // default on
+}
+
+let updateChecking = false;
+
+async function checkForUpdates({ silent = false } = {}) {
+  if (updateChecking) return;
+  updateChecking = true;
+  try {
+    const update = await checkUpdate();
+    if (update) {
+      showToast(`Update ${update.version} available`, {
+        actionLabel: "Update & Relaunch",
+        timeout: 12000,
+        onAction: () => installUpdate(update),
+      });
+    } else if (!silent) {
+      showToast("You're on the latest version");
+    }
+  } catch (err) {
+    console.error("update check failed:", err);
+    if (!silent) showToast("Couldn't check for updates");
+  } finally {
+    updateChecking = false;
+  }
+}
+
+async function installUpdate(update) {
+  const done = showToast("Downloading update…", { timeout: 600000 });
+  try {
+    await update.downloadAndInstall();
+    done();
+    await relaunch();
+  } catch (err) {
+    done();
+    console.error("update install failed:", err);
+    showToast("Update failed");
+  }
+}
+
 // About + Updates + Credits in one section (grouped cards).
 function renderAboutSection() {
   const host = sectionEl("about");
@@ -811,21 +867,31 @@ function renderAboutSection() {
   // Updates group
   host.append(groupTitle("Updates"));
   const updates = groupCard();
+
   const autoRow = groupRow();
   autoRow.append(rowLabel("Automatically check for updates"));
   const toggle = document.createElement("button");
-  toggle.className = "switch";
-  toggle.disabled = true;
-  toggle.title = "Coming in a future version";
+  toggle.className = "switch interactive";
+  toggle.setAttribute("role", "switch");
+  const syncToggle = () => {
+    const on = autoUpdateOn();
+    toggle.classList.toggle("on", on);
+    toggle.setAttribute("aria-checked", on ? "true" : "false");
+  };
+  toggle.addEventListener("click", () => {
+    localStorage.setItem("set-autoupdate", autoUpdateOn() ? "off" : "on");
+    syncToggle();
+  });
+  syncToggle();
   autoRow.append(toggle);
+
   const checkRow = groupRow();
-  const check = document.createElement("button");
-  check.className = "group-link";
-  check.textContent = "Check for updates…";
-  check.addEventListener("click", () =>
-    openUrl(GITHUB ? `${GITHUB}/releases/latest` : "").catch(() => {})
-  );
-  checkRow.append(check);
+  const checkBtn = document.createElement("button");
+  checkBtn.className = "group-link";
+  checkBtn.textContent = "Check for updates…";
+  checkBtn.addEventListener("click", () => checkForUpdates());
+  checkRow.append(checkBtn);
+
   updates.append(autoRow, checkRow);
   host.append(updates);
 
@@ -1537,6 +1603,9 @@ async function init() {
 
   focusEnd();
   requestAnimationFrame(() => document.body.classList.add("ready"));
+
+  // Quietly check for updates shortly after launch (no-op until configured).
+  if (autoUpdateOn()) setTimeout(() => checkForUpdates({ silent: true }), 3000);
 }
 
 window.addEventListener("DOMContentLoaded", init);

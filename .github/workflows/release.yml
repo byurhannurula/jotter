@@ -82,6 +82,13 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Auto-update signing. Empty until the secrets are added; harmless while
+          # bundle.createUpdaterArtifacts is off. To enable in-app updates: run
+          # `pnpm tauri signer generate`, put the public key in tauri.conf.json
+          # (plugins.updater.pubkey), add these two secrets, and set
+          # bundle.createUpdaterArtifacts = true.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Jotter ${{ github.ref_name }}"
