@@ -13,7 +13,11 @@ DEST="/Applications/Jotter.app"
 
 if [[ "${1:-}" != "--no-build" ]]; then
   echo "▶ Building Jotter.app (release)…"
-  pnpm tauri build --bundles app
+  # Local personal builds don't distribute update artifacts, so disable them —
+  # otherwise the build demands the CI-only TAURI_SIGNING_PRIVATE_KEY. The
+  # installed app still auto-updates (it verifies downloaded releases against
+  # the embedded public key).
+  pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
 fi
 
 if [[ ! -d "$APP" ]]; then
