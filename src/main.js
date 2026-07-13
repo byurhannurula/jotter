@@ -117,11 +117,39 @@ function createBlankDraft() {
 
 // --- sidebar rendering ---------------------------------------------------
 
+// Leading glyphs: a pencil for in-app drafts, a document for saved files.
+// (Cloud / shared markers will slot into the sub-line later, behind their flags.)
+const ICON_DRAFT = `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 3.2l2.3 2.3L6 12.3l-2.7.5.5-2.7z"/></svg>`;
+const ICON_FILE = `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2.2h4.6L12 5.6V13.8H4z"/><path d="M8.4 2.2v3.4h3.4M6 9h4M6 11.3h3"/></svg>`;
+const ICON_CLOSE = `<svg viewBox="3 3 10 10" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>`;
+
+/** Compact location for a file path: home → ~, and drop the filename. */
+function fileDir(p) {
+  const dir = p.replace(/[/\\][^/\\]*$/, "") || p;
+  return dir
+    .replace(/^(?:\/Users|\/home)\/[^/]+/, "~")
+    .replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~");
+}
+
+/** Sidebar/switcher sub-line: a saved file always shows its folder; an in-app
+ * draft shows its content preview. Consistent regardless of the content shape. */
+function draftSubText(d) {
+  if (d.file_path) return fileDir(d.file_path);
+  return draftPreview(d) || "No additional text";
+}
+
 function makeItem(d) {
   const li = document.createElement("li");
   li.className = "draft-item" + (d.id === currentId ? " active" : "");
   li.dataset.id = d.id;
   li.title = draftTooltip(d);
+
+  const icon = document.createElement("span");
+  icon.className = "draft-icon";
+  icon.innerHTML = d.file_path ? ICON_FILE : ICON_DRAFT;
+
+  const body = document.createElement("div");
+  body.className = "draft-body";
 
   const title = document.createElement("div");
   title.className = "draft-title";
@@ -131,22 +159,14 @@ function makeItem(d) {
   sub.className = "draft-sub";
   const preview = document.createElement("span");
   preview.className = "preview";
-  preview.textContent = draftPreview(d) || "No additional text";
+  preview.textContent = draftSubText(d);
   const time = document.createElement("span");
   time.className = "time";
   time.textContent = relTime(d.updated_at);
   sub.append(preview, time);
+  body.append(title, sub);
 
-  const del = document.createElement("button");
-  del.className = "draft-del";
-  del.textContent = "×";
-  del.title = "Delete draft";
-  del.addEventListener("click", (e) => {
-    e.stopPropagation();
-    deleteDraft(d.id);
-  });
-
-  li.append(title, sub, del);
+  li.append(icon, body);
   li.addEventListener("click", () => openInTab(d.id));
   li.addEventListener("contextmenu", (e) => openDraftMenu(e, d.id));
   return li;
@@ -174,16 +194,13 @@ function renderList() {
 }
 
 function refreshActiveItem() {
-  const d = drafts.get(currentId);
   const li = itemEls.get(currentId);
-  if (!d || !li) {
+  if (!drafts.get(currentId) || !li) {
     renderList();
     return;
   }
-  li.querySelector(".draft-title").textContent = draftTitle(d);
-  li.querySelector(".preview").textContent =
-    draftPreview(d) || "No additional text";
-  li.querySelector(".time").textContent = relTime(d.updated_at);
+  refreshItemInPlace(currentId);
+  // Keep the most-recently-edited draft at the top of the list.
   if (listEl.firstElementChild !== li) listEl.prepend(li);
 }
 
@@ -204,7 +221,7 @@ function renderTabs() {
 
     const close = document.createElement("button");
     close.className = "tab-close";
-    close.textContent = "×";
+    close.innerHTML = ICON_CLOSE;
     close.title = "Close tab (⌘W)";
     close.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -224,6 +241,26 @@ function renderAll() {
   renderList();
   updateWindowTitle();
   updateStatus();
+}
+
+/** Move the active highlight to `currentId` without rebuilding tabs/list. */
+function setActiveHighlights() {
+  for (const [id, li] of itemEls) {
+    li.classList.toggle("active", id === currentId);
+  }
+  for (const tab of tabsEl.children) {
+    tab.classList.toggle("active", tab.dataset.id === currentId);
+  }
+}
+
+/** Update one sidebar row's title/preview/time in place (no reorder, no rebuild). */
+function refreshItemInPlace(id) {
+  const d = drafts.get(id);
+  const li = itemEls.get(id);
+  if (!d || !li) return;
+  li.querySelector(".draft-title").textContent = draftTitle(d);
+  li.querySelector(".preview").textContent = draftSubText(d);
+  li.querySelector(".time").textContent = relTime(d.updated_at);
 }
 
 let lastWinTitle = "";
@@ -377,13 +414,21 @@ async function activate(id) {
   }
   currentId = id;
   editor.value = d.content;
-  renderAll();
+  // Switching doesn't change the list or tab set — just move the highlight,
+  // so the sidebar/tabs don't rebuild and replay their entrance animation.
+  setActiveHighlights();
+  refreshItemInPlace(id); // the row's content may have changed (disk re-read)
+  updateWindowTitle();
+  updateStatus();
   focusEnd();
 }
 
 async function openInTab(id) {
   if (!drafts.has(id)) return;
-  if (!openTabs.includes(id)) openTabs.push(id);
+  if (!openTabs.includes(id)) {
+    openTabs.push(id);
+    renderTabs(); // a genuinely new tab appears (and animates in)
+  }
   await activate(id);
 }
 
@@ -412,26 +457,39 @@ function pruneIfEmpty(id) {
 async function closeTab(id) {
   const idx = openTabs.indexOf(id);
   if (idx === -1) return;
-  if (id === currentId) await flush();
+  const d = drafts.get(id);
+  // Closing the last tab just spawns a fresh blank; if it's already an empty
+  // blank there's nothing to close — leave it (avoids a pointless rebuild).
+  if (openTabs.length === 1 && d && isEmpty(d)) return;
+
+  const wasCurrent = id === currentId;
+  if (wasCurrent) await flush();
 
   openTabs.splice(idx, 1);
   previewTabs.delete(id);
   // Remember meaningful drafts so ⇧⌘T can reopen them; blanks get pruned away.
-  const closed = drafts.get(id);
-  if (closed && isSaved(closed)) closedStack.push(id);
+  if (d && isSaved(d)) closedStack.push(id);
   pruneIfEmpty(id);
 
   if (openTabs.length === 0) {
-    const d = createBlankDraft();
-    openTabs.push(d.id);
-    currentId = d.id;
+    const nd = createBlankDraft();
+    openTabs.push(nd.id);
+    currentId = nd.id;
     editor.value = "";
-  } else if (id === currentId) {
-    const next = openTabs[Math.min(idx, openTabs.length - 1)];
-    currentId = next;
-    editor.value = drafts.get(next).content;
+    renderTabs(); // the fresh blank tab appears
+  } else {
+    if (wasCurrent) {
+      const next = openTabs[Math.min(idx, openTabs.length - 1)];
+      currentId = next;
+      editor.value = drafts.get(next).content;
+    }
+    // Drop only the closed tab's element so the others don't re-animate.
+    tabsEl.querySelector(`.tab[data-id="${CSS.escape(id)}"]`)?.remove();
   }
-  renderAll();
+  // The sidebar list doesn't change on close — just move the highlight.
+  setActiveHighlights();
+  updateWindowTitle();
+  updateStatus();
   focusEnd();
 }
 
@@ -1012,6 +1070,7 @@ function showContextMenu(x, y, items) {
   const menu = document.createElement("div");
   menu.id = "context-menu";
   menu.className = "context-menu";
+  let i = 0;
   for (const it of items) {
     if (it.separator) {
       const sep = document.createElement("div");
@@ -1022,6 +1081,7 @@ function showContextMenu(x, y, items) {
     const b = document.createElement("button");
     b.className = "context-item" + (it.disabled ? " disabled" : "");
     b.textContent = it.label;
+    b.style.animationDelay = `${i++ * 18}ms`; // gentle stagger on open
     if (!it.disabled) {
       b.addEventListener("click", () => {
         closeContextMenu();
@@ -1271,7 +1331,7 @@ function renderSwitcher(query) {
     t.textContent = draftTitle(d);
     const s = document.createElement("div");
     s.className = "s-sub";
-    s.textContent = `${draftPreview(d) || "No additional text"} · ${relTime(
+    s.textContent = `${draftSubText(d)} · ${relTime(
       d.updated_at
     )}`;
     li.append(t, s);

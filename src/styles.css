@@ -232,7 +232,9 @@ body.sidebar-hidden .sidebar {
 }
 
 .draft-item {
-  position: relative;
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
   padding: 7px 10px;
   border-radius: 8px;
   margin-bottom: 2px;
@@ -241,6 +243,22 @@ body.sidebar-hidden .sidebar {
   -webkit-user-select: none;
   transition: background 0.14s ease;
   animation: item-in 0.2s var(--ease);
+}
+
+.draft-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--muted);
+  transition: color 0.14s ease;
+}
+
+.draft-icon svg {
+  display: block;
+}
+
+.draft-body {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 @keyframes item-in {
@@ -256,6 +274,10 @@ body.sidebar-hidden .sidebar {
 
 .draft-item.active {
   background: var(--item-active);
+}
+
+.draft-item:hover .draft-icon {
+  color: var(--text);
 }
 
 .draft-title {
@@ -285,12 +307,6 @@ body.sidebar-hidden .sidebar {
 .draft-sub .time {
   flex: 0 0 auto;
   color: var(--faint);
-  transition: opacity 0.14s ease;
-}
-
-/* Hide the timestamp on hover so it doesn't sit under the delete button. */
-.draft-item:hover .draft-sub .time {
-  opacity: 0;
 }
 
 .draft-empty {
@@ -298,34 +314,6 @@ body.sidebar-hidden .sidebar {
   font-size: 12px;
   color: var(--faint);
   text-align: center;
-}
-
-.draft-del {
-  position: absolute;
-  top: 50%;
-  right: 6px;
-  transform: translateY(-50%) scale(0.8);
-  width: 20px;
-  height: 20px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 15px;
-  line-height: 1;
-  cursor: default;
-  opacity: 0;
-  transition: opacity 0.14s ease, background 0.14s ease, transform 0.14s ease;
-}
-
-.draft-item:hover .draft-del {
-  opacity: 1;
-  transform: translateY(-50%) scale(1);
-}
-
-.draft-del:hover {
-  background: var(--item-hover);
-  color: var(--text);
 }
 
 /* ---- Editor pane + tabs ---- */
@@ -380,6 +368,7 @@ body.sidebar-hidden .tabbar {
   border-radius: 8px;
   font-size: 12.5px;
   color: var(--muted);
+  background: var(--field-bg);
   cursor: default;
   white-space: nowrap;
   transition: background 0.14s ease, color 0.14s ease;
@@ -414,17 +403,19 @@ body.sidebar-hidden .tabbar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 17px;
-  height: 17px;
+  width: 20px;
+  height: 20px;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: currentColor;
   opacity: 0.45;
-  font-size: 14px;
-  line-height: 1;
   cursor: default;
   transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.tab-close svg {
+  display: block;
 }
 
 .tab:hover .tab-close {
@@ -1192,18 +1183,19 @@ body.no-preview-btn #preview-toggle {
   min-width: 172px;
   padding: 5px;
   border-radius: 9px;
-  background: var(--card-bg);
-  border: 1px solid var(--hairline);
+  background: var(--settings-card); /* solid — text must stay readable */
+  border: 1px solid var(--settings-border);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  transform-origin: top left;
   user-select: none;
   -webkit-user-select: none;
-  animation: ctx-in 0.1s var(--ease);
+  animation: ctx-in 0.13s var(--ease);
 }
 
 @keyframes ctx-in {
   from {
     opacity: 0;
-    transform: scale(0.97);
+    transform: scale(0.96) translateY(-3px);
   }
 }
 
@@ -1219,11 +1211,23 @@ body.no-preview-btn #preview-toggle {
   padding: 6px 10px;
   border-radius: 6px;
   cursor: default;
-  transition: background 0.1s ease;
+  transition: background 0.1s ease, transform 0.08s ease;
+  animation: ctx-item-in 0.16s var(--ease) both;
+}
+
+@keyframes ctx-item-in {
+  from {
+    opacity: 0;
+    transform: translateX(-5px);
+  }
 }
 
 .context-item:hover {
   background: var(--item-active);
+}
+
+.context-item:active {
+  transform: scale(0.98);
 }
 
 .context-item.disabled {
