@@ -1021,6 +1021,198 @@ body.no-preview-btn #preview-toggle {
   text-decoration: underline;
 }
 
+/* ---- Sync settings ---- */
+.sync-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.sync-header-title {
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--text);
+}
+.sync-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--settings-card);
+  border: 1px solid var(--settings-border);
+  white-space: nowrap;
+}
+.sync-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+}
+.sync-pill.ok {
+  color: #30d158;
+}
+.sync-pill.err {
+  color: #ff453a;
+}
+/* Fields fill the row to the right of their label. */
+.sync-input {
+  flex: 1;
+  min-width: 0;
+}
+.sync-token-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sync-eye {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px;
+  display: flex;
+  cursor: default;
+}
+.sync-eye:hover {
+  color: var(--text);
+}
+.sync-eye.on {
+  color: var(--accent);
+}
+.sync-actions-row {
+  justify-content: space-between;
+}
+.sync-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Fixed-width labels so the URL/token fields share one left edge. */
+.sync-row > .group-label {
+  flex: 0 0 84px;
+}
+/* Smaller buttons with a leading icon. */
+.sync-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 12px;
+}
+.sync-btn svg {
+  flex: none;
+  opacity: 0.85;
+}
+.prompt-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.sync-help {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 8px 2px 0;
+}
+.sync-guide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 22px;
+}
+.sync-guide-head .settings-group-title {
+  margin: 0;
+}
+.sync-deploy {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: default;
+  transition: filter 0.12s ease;
+}
+.sync-deploy:hover {
+  filter: brightness(1.06);
+}
+.sync-steps {
+  margin-top: 12px;
+}
+.sync-steps summary {
+  cursor: default;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  padding: 7px 0;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.sync-steps summary:hover {
+  color: var(--accent);
+}
+.sync-steps summary::-webkit-details-marker {
+  display: none;
+}
+.sync-steps summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+  opacity: 0.7;
+}
+.sync-steps[open] summary::before {
+  transform: rotate(90deg);
+}
+.sync-steps ol {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: sync-step;
+}
+.sync-steps li {
+  counter-increment: sync-step;
+  position: relative;
+  padding: 7px 0 7px 30px;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.sync-steps li::before {
+  content: counter(sync-step);
+  position: absolute;
+  left: 0;
+  top: 5px;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--settings-card);
+  border: 1px solid var(--settings-border);
+  color: var(--text);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* About hero */
 .about-hero {
   display: flex;

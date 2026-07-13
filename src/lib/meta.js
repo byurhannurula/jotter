@@ -9,4 +9,11 @@ export const APP = {
     { label: "Follow on X", url: "https://x.com/byurhannurula" },
     { label: "GitHub", url: "https://github.com/byurhannurula/jotter" },
   ],
+  // The self-hosted sync Worker (see Settings -> Sync). deployUrl is the one-click
+  // "Deploy to Cloudflare" link; repoUrl is the source.
+  worker: {
+    deployUrl:
+      "https://deploy.workers.cloudflare.com/?url=https://github.com/byurhannurula/jotter-cloud",
+    repoUrl: "https://github.com/byurhannurula/jotter-cloud",
+  },
 };

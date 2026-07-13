@@ -986,6 +986,287 @@ function renderAboutSection() {
   });
 }
 
+// --- Sync settings (self-hosted cloud) -----------------------------------
+// Bespoke (not the SETTINGS/localStorage registry) so the auth token stays in
+// Rust (sync.json) and never touches the webview's localStorage. Reads/writes go
+// through get_sync_config / set_sync_config; the token is fetched (get_sync_token)
+// only on explicit reveal/copy.
+
+let refreshSyncSection = () => {};
+
+function genSyncToken() {
+  const b = new Uint8Array(32);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+const EYE_SVG = `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8s2.4-4.3 6.5-4.3S14.5 8 14.5 8 12.1 12.3 8 12.3 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="1.8"/></svg>`;
+const CLOUD_SVG = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.6 15a3.6 3.6 0 0 1-.4-7.18A4.3 4.3 0 0 1 13.4 6.9a3.2 3.2 0 0 1-.1 6.1"/></svg>`;
+const COPY_SVG = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H3.5A1.5 1.5 0 0 0 2 4v5.5A1.5 1.5 0 0 0 3.5 11H5"/></svg>`;
+const REFRESH_SVG = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.7"/><path d="M13.4 2.4V5h-2.6"/></svg>`;
+const CHECK_SVG = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>`;
+
+function renderSyncSection() {
+  const host = sectionEl("sync");
+  host.replaceChildren();
+
+  // Header: title + status pill
+  const header = document.createElement("div");
+  header.className = "sync-header";
+  const title = document.createElement("div");
+  title.className = "sync-header-title";
+  title.textContent = "Sync";
+  const pill = document.createElement("span");
+  pill.className = "sync-pill";
+  header.append(title, pill);
+  host.append(header);
+
+  // Connection card
+  host.append(groupTitle("Connection"));
+  const conn = groupCard();
+
+  // Enable toggle
+  const enableRow = groupRow();
+  enableRow.classList.add("sync-row");
+  enableRow.append(rowLabel("Enable sync"));
+  const enableSw = document.createElement("button");
+  enableSw.className = "switch interactive";
+  enableSw.setAttribute("role", "switch");
+  enableRow.append(enableSw);
+  conn.append(enableRow);
+
+  // Worker URL
+  const urlRow = groupRow();
+  urlRow.classList.add("sync-row");
+  urlRow.append(rowLabel("Worker URL"));
+  const urlInput = document.createElement("input");
+  urlInput.className = "prompt-input sync-input";
+  urlInput.type = "url";
+  urlInput.placeholder = "https://…workers.dev";
+  urlInput.spellcheck = false;
+  urlRow.append(urlInput);
+  conn.append(urlRow);
+
+  // Auth token + reveal eye
+  const tokenRow = groupRow();
+  tokenRow.classList.add("sync-row");
+  tokenRow.append(rowLabel("Auth token"));
+  const tokenWrap = document.createElement("div");
+  tokenWrap.className = "sync-token-wrap";
+  const tokenInput = document.createElement("input");
+  tokenInput.className = "prompt-input sync-input";
+  tokenInput.type = "password";
+  tokenInput.placeholder = "paste or generate";
+  tokenInput.autocomplete = "off";
+  tokenInput.spellcheck = false;
+  const eyeBtn = document.createElement("button");
+  eyeBtn.className = "sync-eye";
+  eyeBtn.type = "button";
+  eyeBtn.title = "Show token";
+  eyeBtn.setAttribute("aria-label", "Show token");
+  eyeBtn.innerHTML = EYE_SVG;
+  tokenWrap.append(tokenInput, eyeBtn);
+  tokenRow.append(tokenWrap);
+  conn.append(tokenRow);
+
+  // Actions: Copy token / Regenerate (left) — Verify Connection (right)
+  const actionsRow = groupRow();
+  actionsRow.className = "group-row sync-actions-row";
+  const leftActions = document.createElement("div");
+  leftActions.className = "sync-actions";
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "prompt-btn sync-btn";
+  copyBtn.innerHTML = `${COPY_SVG}<span>Copy</span>`;
+  const genBtn = document.createElement("button");
+  genBtn.className = "prompt-btn sync-btn";
+  genBtn.innerHTML = `${REFRESH_SVG}<span>Regenerate</span>`;
+  leftActions.append(copyBtn, genBtn);
+  const verifyBtn = document.createElement("button");
+  verifyBtn.className = "prompt-btn primary sync-btn";
+  verifyBtn.innerHTML = `${CHECK_SVG}<span>Verify Connection</span>`;
+  actionsRow.append(leftActions, verifyBtn);
+  conn.append(actionsRow);
+  host.append(conn);
+
+  const help = document.createElement("p");
+  help.className = "sync-help";
+  help.textContent =
+    "Paste this token as the worker's SYNC_TOKEN secret when you deploy to Cloudflare. It's the only thing protecting your notes — treat it like a password.";
+  host.append(help);
+
+  // Setup Guide
+  const guideHead = document.createElement("div");
+  guideHead.className = "sync-guide-head";
+  guideHead.append(groupTitle("Setup Guide"));
+  const ghLink = document.createElement("button");
+  ghLink.className = "group-link";
+  ghLink.textContent = "View on GitHub";
+  ghLink.addEventListener("click", () => openUrl(APP.worker.repoUrl).catch(() => {}));
+  guideHead.append(ghLink);
+  host.append(guideHead);
+
+  const deployBtn = document.createElement("button");
+  deployBtn.className = "sync-deploy";
+  deployBtn.innerHTML = `${CLOUD_SVG}<span>Deploy to Cloudflare</span>`;
+  deployBtn.addEventListener("click", () => openUrl(APP.worker.deployUrl).catch(() => {}));
+  host.append(deployBtn);
+
+  const steps = document.createElement("details");
+  steps.className = "sync-steps";
+  const summary = document.createElement("summary");
+  summary.textContent = "Setup steps";
+  steps.append(summary);
+  const ol = document.createElement("ol");
+  for (const t of [
+    "Generate a token above and copy it — you'll paste it into Cloudflare next.",
+    'Click "Deploy to Cloudflare". It clones the worker, provisions R2 + D1, and asks for the SYNC_TOKEN secret — paste the token you copied.',
+    'Paste your worker URL above, then click "Verify Connection" to finish and confirm.',
+  ]) {
+    const li = document.createElement("li");
+    li.textContent = t;
+    ol.append(li);
+  }
+  steps.append(ol);
+  host.append(steps);
+
+  // --- state + behavior ---
+  let hasToken = false;
+  let verifiedOk = false;
+
+  const setEnable = (on) => {
+    enableSw.classList.toggle("on", on);
+    enableSw.setAttribute("aria-checked", on ? "true" : "false");
+  };
+  const isEnabled = () => enableSw.classList.contains("on");
+
+  function setPill(text, kind) {
+    if (text !== undefined) {
+      pill.textContent = text;
+      pill.className = "sync-pill" + (kind ? " " + kind : "");
+      return;
+    }
+    if (verifiedOk) return setPill("Connected", "ok");
+    const configured = !!urlInput.value.trim() && (hasToken || !!tokenInput.value.trim());
+    setPill(configured ? "Not verified" : "Not configured", "");
+  }
+
+  function updateEnabled() {
+    const hasTok = hasToken || !!tokenInput.value.trim();
+    verifyBtn.disabled = !(urlInput.value.trim() && hasTok);
+    copyBtn.disabled = !hasTok;
+  }
+
+  // The raw token: the field if the user typed/generated one, else fetched from
+  // Rust on demand (reveal / copy only).
+  async function currentToken() {
+    const v = tokenInput.value.trim();
+    if (v) return v;
+    if (hasToken) {
+      try {
+        return await invoke("get_sync_token");
+      } catch {
+        return "";
+      }
+    }
+    return "";
+  }
+
+  // Persist current fields. A blank token field sends null so Rust keeps the
+  // stored token (URL/enable edits never wipe it).
+  async function save() {
+    const token = tokenInput.value.trim();
+    await invoke("set_sync_config", {
+      enabled: isEnabled(),
+      url: urlInput.value.trim(),
+      token: token || null,
+    });
+    if (token) hasToken = true;
+  }
+
+  enableSw.addEventListener("click", async () => {
+    setEnable(!isEnabled());
+    try {
+      await save();
+    } catch {
+      /* ignore; re-shown on next open */
+    }
+  });
+
+  const dirty = () => {
+    verifiedOk = false;
+    updateEnabled();
+    setPill();
+  };
+  urlInput.addEventListener("input", dirty);
+  tokenInput.addEventListener("input", dirty);
+
+  genBtn.addEventListener("click", () => {
+    const token = genSyncToken();
+    tokenInput.type = "text"; // reveal so the user can copy it into the worker secret
+    tokenInput.value = token;
+    eyeBtn.classList.add("on");
+    dirty();
+    copyText(token, "Token copied — paste it into the worker's SYNC_TOKEN secret");
+  });
+
+  copyBtn.addEventListener("click", async () => {
+    const t = await currentToken();
+    if (t) copyText(t, "Token copied");
+  });
+
+  eyeBtn.addEventListener("click", async () => {
+    if (tokenInput.type === "password") {
+      if (!tokenInput.value && hasToken) tokenInput.value = await currentToken();
+      tokenInput.type = "text";
+      eyeBtn.classList.add("on");
+    } else {
+      tokenInput.type = "password";
+      eyeBtn.classList.remove("on");
+    }
+  });
+
+  verifyBtn.addEventListener("click", async () => {
+    verifyBtn.disabled = true;
+    setPill("Verifying…", "");
+    try {
+      await save(); // save first; the test reads the stored url + token in Rust
+      const r = await invoke("sync_test_connection");
+      if (r.ok) {
+        verifiedOk = true;
+        setPill("Connected" + (r.version ? ` · v${r.version}` : ""), "ok");
+      } else if (r.status === 401) {
+        setPill("Invalid token", "err");
+      } else {
+        setPill(`Error ${r.status}`, "err");
+      }
+    } catch {
+      setPill("Unreachable", "err"); // transport failure (DNS/timeout/TLS)
+    } finally {
+      updateEnabled();
+    }
+  });
+
+  async function populate() {
+    try {
+      const cfg = await invoke("get_sync_config");
+      setEnable(!!cfg.enabled);
+      urlInput.value = cfg.url || "";
+      hasToken = !!cfg.has_token;
+      tokenInput.value = "";
+      tokenInput.type = "password";
+      eyeBtn.classList.remove("on");
+      verifiedOk = false;
+      updateEnabled();
+      setPill();
+    } catch (e) {
+      console.error("get_sync_config failed:", e);
+    }
+  }
+
+  refreshSyncSection = populate;
+  populate();
+}
+
 function showSection(name) {
   for (const s of document.querySelectorAll(".settings-section")) {
     s.hidden = s.dataset.section !== name;
@@ -998,6 +1279,7 @@ function showSection(name) {
 function openSettings(section = "general") {
   openModal("settings");
   showSection(section);
+  if (section === "sync") refreshSyncSection();
 }
 
 function initSettings() {
@@ -1012,6 +1294,7 @@ function initSettings() {
     markControl(name, getSetting(name));
   }
   renderShortcutsSection();
+  renderSyncSection();
   renderAboutSection();
   showSection("general");
   for (const r of document.querySelectorAll(".rail-item")) {

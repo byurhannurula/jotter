@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -161,6 +162,170 @@ fn read_text_file(path: String) -> Result<String, String> {
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> Result<(), String> {
     fs::write(path, contents).map_err(|e| e.to_string())
+}
+
+// --- Cloud sync config (opt-in, self-hosted) --------------------------------
+//
+// The token lives here in Rust — never the webview — so it can't leak through the
+// DOM. `synced`/`tombstones` are the C2 sync ledger; defined now so enabling the
+// engine later doesn't reshape the on-disk file. Everything is `#[serde(default)]`
+// so a partial or older `sync.json` still deserializes.
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct SyncConfig {
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    url: String,
+    #[serde(default)]
+    token: String,
+    #[serde(default)]
+    synced: HashMap<String, i64>,
+    #[serde(default)]
+    tombstones: HashMap<String, i64>,
+}
+
+/// What the settings UI is allowed to see — the token is deliberately omitted.
+#[derive(Serialize)]
+struct SyncConfigView {
+    enabled: bool,
+    url: String,
+    has_token: bool,
+}
+
+/// Result of a `/health` probe. `ok` is true only on HTTP 200; `status` lets the
+/// UI distinguish 401 (bad token) from other failures.
+#[derive(Serialize)]
+struct TestResult {
+    ok: bool,
+    status: u16,
+    version: Option<String>,
+}
+
+fn sync_file(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("sync.json"))
+}
+
+fn read_sync_config(app: &AppHandle) -> SyncConfig {
+    sync_file(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<SyncConfig>(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_sync_config(app: &AppHandle, cfg: &SyncConfig) -> Result<(), String> {
+    let path = sync_file(app)?;
+    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())?;
+    // Restrict to owner-only (0600) on unix — the file holds the auth token. No-op
+    // on Windows, which relies on the per-user app_data_dir. Best-effort.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Normalize a worker URL: trim whitespace and any trailing slashes so request
+/// paths (`{url}/health`) compose cleanly and match between save and test.
+fn normalize_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_string()
+}
+
+/// Merge a config update onto an existing config, preserving the sync ledger and
+/// the stored token when no new token is supplied. Pure, so it's unit-tested.
+fn apply_config_update(
+    mut cfg: SyncConfig,
+    enabled: bool,
+    url: String,
+    token: Option<String>,
+) -> SyncConfig {
+    cfg.enabled = enabled;
+    cfg.url = normalize_url(&url);
+    if let Some(t) = token {
+        if !t.is_empty() {
+            cfg.token = t;
+        }
+    }
+    cfg
+}
+
+/// Save the sync settings. A `None`/empty `token` keeps the stored one, so saving
+/// URL/enable alone never wipes the token. `synced`/`tombstones` are preserved.
+#[tauri::command]
+fn set_sync_config(
+    app: AppHandle,
+    enabled: bool,
+    url: String,
+    token: Option<String>,
+) -> Result<(), String> {
+    let cfg = apply_config_update(read_sync_config(&app), enabled, url, token);
+    write_sync_config(&app, &cfg)
+}
+
+/// Read the sync settings for the UI — never returns the token.
+#[tauri::command]
+fn get_sync_config(app: AppHandle) -> SyncConfigView {
+    let cfg = read_sync_config(&app);
+    SyncConfigView {
+        enabled: cfg.enabled,
+        url: cfg.url,
+        has_token: !cfg.token.is_empty(),
+    }
+}
+
+/// Return the stored token — only for the settings UI's reveal-eye and "Copy
+/// token" actions (the user needs to see/copy it to paste into the worker's
+/// SYNC_TOKEN secret). Kept out of `get_sync_config` so the token is fetched only
+/// on explicit user intent, never on every settings render.
+#[tauri::command]
+fn get_sync_token(app: AppHandle) -> String {
+    read_sync_config(&app).token
+}
+
+/// Probe `{url}/health` using the **stored** URL + token (read from sync.json), so
+/// the token never has to enter the webview even to test. The settings UI saves
+/// first (`set_sync_config`), then calls this. Transport failures (DNS, timeout,
+/// TLS) return `Err` so the UI can show "Unreachable"; a reachable-but-rejecting
+/// worker returns `Ok` with the status so the UI can say "Invalid token" on 401.
+#[tauri::command]
+async fn sync_test_connection(app: AppHandle) -> Result<TestResult, String> {
+    let cfg = read_sync_config(&app);
+    if cfg.url.is_empty() {
+        return Err("no worker url configured".into());
+    }
+    let base = normalize_url(&cfg.url);
+    let token = cfg.token;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(format!("{base}/health"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status().as_u16();
+    let version = if status == 200 {
+        resp.json::<serde_json::Value>()
+            .await
+            .ok()
+            .and_then(|v| {
+                v.get("version")
+                    .and_then(|x| x.as_str())
+                    .map(String::from)
+            })
+    } else {
+        None
+    };
+    Ok(TestResult {
+        ok: status == 200,
+        status,
+        version,
+    })
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
@@ -401,7 +566,11 @@ pub fn run() {
             save_draft,
             delete_draft,
             read_text_file,
-            write_text_file
+            write_text_file,
+            set_sync_config,
+            get_sync_config,
+            get_sync_token,
+            sync_test_connection
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -467,6 +636,75 @@ mod tests {
         let back: Draft = serde_json::from_str(&json).unwrap();
         assert_eq!(back.content, "note body");
         assert_eq!(back.file_path.as_deref(), Some("/tmp/n.txt"));
+    }
+
+    // --- sync config ---
+
+    fn cfg_with_token(token: &str) -> SyncConfig {
+        SyncConfig {
+            enabled: false,
+            url: "https://old.example".into(),
+            token: token.into(),
+            synced: HashMap::from([("draft-a".into(), 5)]),
+            tombstones: HashMap::from([("draft-b".into(), 9)]),
+        }
+    }
+
+    #[test]
+    fn update_preserves_token_when_none() {
+        let out = apply_config_update(cfg_with_token("secret"), true, "https://new.example".into(), None);
+        assert_eq!(out.token, "secret"); // token untouched
+        assert!(out.enabled);
+        assert_eq!(out.url, "https://new.example");
+    }
+
+    #[test]
+    fn update_preserves_token_when_empty_string() {
+        let out = apply_config_update(cfg_with_token("secret"), false, "https://x".into(), Some(String::new()));
+        assert_eq!(out.token, "secret");
+    }
+
+    #[test]
+    fn update_replaces_token_when_supplied() {
+        let out = apply_config_update(cfg_with_token("old"), false, "https://x".into(), Some("new".into()));
+        assert_eq!(out.token, "new");
+    }
+
+    #[test]
+    fn update_preserves_sync_ledger() {
+        let out = apply_config_update(cfg_with_token("t"), true, "https://x".into(), None);
+        assert_eq!(out.synced.get("draft-a"), Some(&5));
+        assert_eq!(out.tombstones.get("draft-b"), Some(&9));
+    }
+
+    #[test]
+    fn update_normalizes_trailing_slashes() {
+        let out = apply_config_update(SyncConfig::default(), false, "  https://x.example///  ".into(), None);
+        assert_eq!(out.url, "https://x.example");
+    }
+
+    #[test]
+    fn sync_config_deserializes_from_empty_and_legacy() {
+        let empty: SyncConfig = serde_json::from_str("{}").unwrap();
+        assert!(!empty.enabled && empty.token.is_empty() && empty.synced.is_empty());
+        // Legacy file missing synced/tombstones still loads.
+        let legacy: SyncConfig =
+            serde_json::from_str(r#"{"enabled":true,"url":"https://y","token":"tok"}"#).unwrap();
+        assert!(legacy.enabled);
+        assert_eq!(legacy.token, "tok");
+        assert!(legacy.tombstones.is_empty());
+    }
+
+    #[test]
+    fn view_hides_token_but_reports_presence() {
+        let view = SyncConfigView {
+            enabled: cfg_with_token("secret").enabled,
+            url: cfg_with_token("secret").url,
+            has_token: !cfg_with_token("secret").token.is_empty(),
+        };
+        let json = serde_json::to_string(&view).unwrap();
+        assert!(!json.contains("secret"));
+        assert!(json.contains("\"has_token\":true"));
     }
 }
 
