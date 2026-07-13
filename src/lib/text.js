@@ -19,9 +19,15 @@ export function firstLine(content) {
   return "";
 }
 
-/** Display title: file name, else first line (≤60 chars), else "New Draft". */
+/** Display title: a user-set name (via Rename), else file name, else first line
+ * (≤60 chars), else "New Draft". */
 export function draftTitle(d) {
-  return baseName(d.file_path) || firstLine(d.content).slice(0, 60) || "New Draft";
+  return (
+    (d.title && d.title.trim()) ||
+    baseName(d.file_path) ||
+    firstLine(d.content).slice(0, 60) ||
+    "New Draft"
+  );
 }
 
 /** One-line preview (text after the first line), bounded for long docs. */

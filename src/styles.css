@@ -1184,6 +1184,134 @@ body.no-preview-btn #preview-toggle {
   }
 }
 
+/* ---- Context menu ---- */
+
+.context-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 172px;
+  padding: 5px;
+  border-radius: 9px;
+  background: var(--card-bg);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  user-select: none;
+  -webkit-user-select: none;
+  animation: ctx-in 0.1s var(--ease);
+}
+
+@keyframes ctx-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+
+.context-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 0.1s ease;
+}
+
+.context-item:hover {
+  background: var(--item-active);
+}
+
+.context-item.disabled {
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.context-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--hairline);
+}
+
+/* ---- Prompt (rename) ---- */
+
+.prompt-box {
+  width: 320px;
+  max-width: 88vw;
+  padding: 18px;
+  border-radius: 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  animation: card-in 0.2s var(--ease);
+}
+
+.modal-backdrop.closing .prompt-box {
+  animation: card-out 0.16s ease forwards;
+}
+
+.prompt-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.prompt-input {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--field-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13.5px;
+  padding: 0 10px;
+  outline: none;
+  transition: box-shadow 0.14s ease;
+}
+
+.prompt-input:focus {
+  box-shadow: 0 0 0 2px var(--selection);
+}
+
+.prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.prompt-btn {
+  border: 1px solid var(--hairline);
+  background: var(--field-bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: default;
+  transition: background 0.12s ease, filter 0.12s ease;
+}
+
+.prompt-btn:hover {
+  background: var(--item-hover);
+}
+
+.prompt-btn.primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.prompt-btn.primary:hover {
+  filter: brightness(1.05);
+}
+
 /* ---- Quick switcher (⌘P) ---- */
 
 .switcher-backdrop {

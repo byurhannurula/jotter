@@ -6,9 +6,10 @@ import {
   open as openDialog,
   save as saveDialog,
 } from "@tauri-apps/plugin-dialog";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import MarkdownIt from "markdown-it";
 import {
+  baseName,
   draftTitle,
   draftPreview,
   isEmpty,
@@ -145,6 +146,7 @@ function makeItem(d) {
 
   li.append(title, sub, del);
   li.addEventListener("click", () => openInTab(d.id));
+  li.addEventListener("contextmenu", (e) => openDraftMenu(e, d.id));
   return li;
 }
 
@@ -209,6 +211,7 @@ function renderTabs() {
 
     tab.append(title, close);
     tab.addEventListener("click", () => activate(id));
+    tab.addEventListener("contextmenu", (e) => openDraftMenu(e, id));
     tabsEl.append(tab);
   }
 }
@@ -923,6 +926,245 @@ function showToast(message, { actionLabel, onAction, timeout = 5000 } = {}) {
   host.append(toast);
   timer = setTimeout(dismiss, timeout);
   return dismiss;
+}
+
+// --- context menu + draft actions ----------------------------------------
+
+let ctxCleanup = null;
+
+function closeContextMenu() {
+  document.getElementById("context-menu")?.remove();
+  if (ctxCleanup) {
+    ctxCleanup();
+    ctxCleanup = null;
+  }
+}
+
+/** Show a small menu at (x, y). `items` = {label, action, disabled} or {separator}. */
+function showContextMenu(x, y, items) {
+  closeContextMenu();
+  const menu = document.createElement("div");
+  menu.id = "context-menu";
+  menu.className = "context-menu";
+  for (const it of items) {
+    if (it.separator) {
+      const sep = document.createElement("div");
+      sep.className = "context-sep";
+      menu.append(sep);
+      continue;
+    }
+    const b = document.createElement("button");
+    b.className = "context-item" + (it.disabled ? " disabled" : "");
+    b.textContent = it.label;
+    if (!it.disabled) {
+      b.addEventListener("click", () => {
+        closeContextMenu();
+        it.action();
+      });
+    }
+    menu.append(b);
+  }
+  document.body.append(menu);
+
+  // Clamp to the viewport.
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, window.innerWidth - r.width - 6))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, window.innerHeight - r.height - 6))}px`;
+
+  const onDown = (e) => {
+    if (!menu.contains(e.target)) closeContextMenu();
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") closeContextMenu();
+  };
+  const onGone = () => closeContextMenu();
+  // Defer so the opening right-click doesn't immediately dismiss it.
+  requestAnimationFrame(() => document.addEventListener("mousedown", onDown));
+  document.addEventListener("keydown", onKey);
+  window.addEventListener("blur", onGone);
+  window.addEventListener("resize", onGone);
+  document.addEventListener("scroll", onGone, true);
+  ctxCleanup = () => {
+    document.removeEventListener("mousedown", onDown);
+    document.removeEventListener("keydown", onKey);
+    window.removeEventListener("blur", onGone);
+    window.removeEventListener("resize", onGone);
+    document.removeEventListener("scroll", onGone, true);
+  };
+}
+
+/** A tiny one-field prompt modal. Resolves to the trimmed value, or null on cancel. */
+function promptText({ title = "Rename", value = "", okLabel = "Save" } = {}) {
+  return new Promise((resolve) => {
+    const box = document.getElementById("prompt");
+    const input = document.getElementById("prompt-input");
+    const okBtn = document.getElementById("prompt-ok");
+    const cancelBtn = document.getElementById("prompt-cancel");
+    document.getElementById("prompt-title").textContent = title;
+    okBtn.textContent = okLabel;
+    input.value = value;
+    openModal("prompt");
+    input.focus();
+    input.select();
+
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      input.removeEventListener("keydown", onKey);
+      box.removeEventListener("mousedown", onBackdrop);
+      closeModal("prompt");
+      resolve(result);
+    };
+    const onOk = () => finish(input.value.trim() || null);
+    const onCancel = () => finish(null);
+    const onKey = (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onOk();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        onCancel();
+      }
+    };
+    const onBackdrop = (e) => {
+      if (e.target === box) onCancel();
+    };
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+    input.addEventListener("keydown", onKey);
+    box.addEventListener("mousedown", onBackdrop);
+  });
+}
+
+async function renameDraft(id) {
+  const d = drafts.get(id);
+  if (!d) return;
+  const name = await promptText({
+    title: "Rename draft",
+    value: draftTitle(d),
+    okLabel: "Rename",
+  });
+  if (name === null) return; // cancelled
+  d.title = name;
+  d.updated_at = Date.now();
+  await invoke("save_draft", { draft: d }).catch((e) => console.error(e));
+  renderAll();
+}
+
+async function copyText(text, msg) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.append(ta);
+    ta.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      ta.remove();
+    }
+  }
+  showToast(msg);
+}
+
+async function revealDraft(path) {
+  if (!path) return;
+  try {
+    await revealItemInDir(path);
+  } catch (err) {
+    console.error("reveal failed:", err);
+    showToast("Couldn't reveal the file");
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(
+    /[&<>"]/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+  );
+}
+
+/** Standalone HTML document from a draft's markdown, for Export. */
+function exportHtml(title, content) {
+  const body = md.render(content || "");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${escapeHtml(title)}</title>
+<style>
+  body { max-width: 720px; margin: 40px auto; padding: 0 20px;
+    font: 16px/1.65 -apple-system, system-ui, sans-serif; color: #1d1d1f; }
+  h1, h2, h3, h4 { line-height: 1.25; }
+  pre { background: #f4f4f6; padding: 12px 14px; border-radius: 8px; overflow-x: auto; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+  pre code { background: none; }
+  blockquote { margin: 0 0 1em; padding-left: 1em; border-left: 3px solid #ddd; color: #666; }
+  a { color: #0a84ff; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1a1a; color: #e8e8e8; }
+    pre { background: #262628; }
+    blockquote { border-color: #444; color: #aaa; }
+  }
+</style>
+</head>
+<body class="markdown-body">
+${body}
+</body>
+</html>
+`;
+}
+
+async function exportDraft(id) {
+  const d = drafts.get(id);
+  if (!d) return;
+  const content = id === currentId ? editor.value : d.content;
+  const stem =
+    (d.file_path ? baseName(d.file_path).replace(/\.[^.]+$/, "") : draftTitle(d)) ||
+    "Untitled";
+  const path = await saveDialog({
+    defaultPath: `${stem}.md`,
+    filters: [
+      { name: "Markdown", extensions: ["md"] },
+      { name: "Plain Text", extensions: ["txt"] },
+      { name: "HTML", extensions: ["html"] },
+    ],
+  });
+  if (!path) return;
+  const contents = /\.html?$/i.test(path)
+    ? exportHtml(draftTitle(d), content)
+    : content;
+  try {
+    await invoke("write_text_file", { path, contents });
+    showToast("Exported");
+  } catch (err) {
+    console.error("export failed:", err);
+    showToast("Export failed");
+  }
+}
+
+/** Open the draft context menu at the event position. */
+function openDraftMenu(e, id) {
+  e.preventDefault();
+  const d = drafts.get(id);
+  if (!d) return;
+  const hasFile = !!d.file_path;
+  showContextMenu(e.clientX, e.clientY, [
+    { label: "Rename…", action: () => renameDraft(id) },
+    { label: "Copy Path", action: () => copyText(d.file_path, "Path copied"), disabled: !hasFile },
+    { label: "Reveal in Finder", action: () => revealDraft(d.file_path), disabled: !hasFile },
+    { separator: true },
+    { label: "Export…", action: () => exportDraft(id) },
+    { separator: true },
+    { label: "Delete", action: () => deleteDraft(id) },
+  ]);
 }
 
 // --- quick switcher (⌘P) -------------------------------------------------

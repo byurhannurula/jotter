@@ -146,6 +146,13 @@ fn read_text_file(path: String) -> Result<String, String> {
     fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
+/// Write text to an arbitrary path the user picked (used by Export). Unlike
+/// `save_draft`, this doesn't touch the draft's own file_path.
+#[tauri::command]
+fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    fs::write(path, contents).map_err(|e| e.to_string())
+}
+
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let about = MenuItemBuilder::with_id("about", "About Jotter").build(app)?;
     let app_menu = SubmenuBuilder::new(app, "Jotter")
@@ -379,7 +386,8 @@ pub fn run() {
             init_store,
             save_draft,
             delete_draft,
-            read_text_file
+            read_text_file,
+            write_text_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

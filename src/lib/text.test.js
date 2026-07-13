@@ -30,6 +30,14 @@ describe("firstLine", () => {
 });
 
 describe("draftTitle", () => {
+  it("prefers a user-set title (Rename) over everything", () => {
+    expect(
+      draftTitle({ title: "My Notes", file_path: "/a/report.txt", content: "hi" })
+    ).toBe("My Notes");
+    expect(draftTitle({ title: "  ", file_path: null, content: "first line" })).toBe(
+      "first line"
+    ); // blank title is ignored
+  });
   it("prefers the file name", () => {
     expect(draftTitle({ file_path: "/a/report.txt", content: "hi" })).toBe("report.txt");
   });
