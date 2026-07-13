@@ -2,7 +2,7 @@
 // Edit here to change what the About dialog shows — nothing else references these strings.
 export const APP = {
   name: "Jotter",
-  version: "0.1.0",
+  version: "0.2.0",
   tagline: "A quiet place for quick thoughts.",
   author: "Byurhan Nurula",
   links: [
