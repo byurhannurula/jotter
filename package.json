@@ -35,7 +35,8 @@
     "tauri": "tauri",
     "ship": "bash install.sh",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

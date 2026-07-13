@@ -1,0 +1,62 @@
+name: Update Homebrew tap
+
+# When a release is published (you flip the draft to published), hash the macOS
+# DMG and push the updated version + sha256 into the jotter cask in
+# byurhannurula/homebrew-tap, so `brew upgrade --cask jotter` picks it up.
+#
+# Requires a repo secret HOMEBREW_TAP_TOKEN: a fine-grained PAT with
+# Contents: read/write on the byurhannurula/homebrew-tap repo. The default
+# GITHUB_TOKEN can't push to a different repository.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  cask:
+    runs-on: macos-latest
+    steps:
+      - name: Get DMG + sha256
+        id: dmg
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          ver="${tag#v}"
+          asset="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name | select(endswith(".dmg"))' | head -1)"
+          if [ -z "$asset" ]; then
+            echo "No .dmg asset on $tag — nothing to do."
+            exit 0
+          fi
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$asset"
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          echo "sha=$(shasum -a 256 "$asset" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap
+        if: steps.dmg.outputs.sha != ''
+        uses: actions/checkout@v4
+        with:
+          repository: byurhannurula/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Bump cask + push
+        if: steps.dmg.outputs.sha != ''
+        env:
+          VER: ${{ steps.dmg.outputs.ver }}
+          SHA: ${{ steps.dmg.outputs.sha }}
+        run: |
+          f=tap/Casks/jotter.rb
+          sed -i '' -E "s/^  version \".*\"/  version \"$VER\"/" "$f"
+          sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$SHA\"/" "$f"
+          cd tap
+          if git diff --quiet; then
+            echo "Cask already up to date."
+            exit 0
+          fi
+          git config user.name  "jotter-release"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -aqm "jotter $VER"
+          git push
