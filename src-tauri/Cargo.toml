@@ -1,6 +1,6 @@
 [package]
 name = "mac-notepad"
-version = "0.2.2"
+version = "0.2.3"
 description = "A fast, minimal notepad with an autosaved drafts store"
 authors = ["Byurhan Nurula"]
 license = "AGPL-3.0-or-later"
