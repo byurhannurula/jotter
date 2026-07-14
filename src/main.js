@@ -19,6 +19,7 @@ import {
   findMatches,
 } from "./lib/text.js";
 import { APP } from "./lib/meta.js";
+import { reconcileDrafts } from "./lib/sync-reconcile.js";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -1378,36 +1379,15 @@ async function refreshFromSync() {
   } catch {
     return;
   }
-  const store = new Map(list.map((d) => [d.id, d]));
-
-  // Store -> model: add new drafts, adopt strictly-newer ones.
-  for (const [id, sd] of store) {
-    const cur = drafts.get(id);
-    if (!cur) {
-      drafts.set(id, sd);
-      continue;
-    }
-    if (sd.updated_at <= cur.updated_at) continue; // ours is same or newer
-    if (id === currentId) {
-      // Don't overwrite an in-progress edit; only adopt if the editor is clean.
-      if (editor.value === cur.content) {
-        drafts.set(id, sd);
-        editor.value = sd.content;
-      }
-    } else {
-      sd.file_path = cur.file_path ?? sd.file_path; // keep the device-local path
-      drafts.set(id, sd);
-    }
-  }
-
-  // Remote deletions: a persisted in-app draft that's gone from the store.
-  for (const id of [...drafts.keys()]) {
-    if (store.has(id) || id === currentId) continue;
-    const d = drafts.get(id);
-    if (isEmpty(d) || d.file_path) continue; // unsaved blank or file-backed: leave it
-    removeDraftFromView(id);
-  }
-
+  const { updates, removals, editorContent } = reconcileDrafts(
+    list,
+    drafts,
+    currentId,
+    editor.value
+  );
+  for (const upd of updates) drafts.set(upd.id, upd);
+  if (editorContent !== null) editor.value = editorContent;
+  for (const id of removals) removeDraftFromView(id);
   renderAll();
 }
 
