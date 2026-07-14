@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -56,14 +56,17 @@ fn drafts_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn draft_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
-    Ok(drafts_dir(app)?.join(format!("{id}.json")))
+// Directory-based store primitives — take a plain `dir` so the sync engine can be
+// driven against a tempdir in tests. The `app`-based wrappers below resolve the
+// real drafts dir and delegate.
+
+fn draft_path(dir: &Path, id: &str) -> PathBuf {
+    dir.join(format!("{id}.json"))
 }
 
-fn read_all_drafts(app: &AppHandle) -> Result<Vec<Draft>, String> {
-    let dir = drafts_dir(app)?;
+fn read_all_drafts_in(dir: &Path) -> Result<Vec<Draft>, String> {
     let mut out = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
@@ -74,6 +77,24 @@ fn read_all_drafts(app: &AppHandle) -> Result<Vec<Draft>, String> {
             }
         }
     }
+    Ok(out)
+}
+
+fn write_draft_in(dir: &Path, draft: &Draft) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
+    fs::write(draft_path(dir, &draft.id), json).map_err(|e| e.to_string())?;
+    if let Some(fp) = &draft.file_path {
+        fs::write(fp, &draft.content).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn draft_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    Ok(draft_path(&drafts_dir(app)?, id))
+}
+
+fn read_all_drafts(app: &AppHandle) -> Result<Vec<Draft>, String> {
+    let mut out = read_all_drafts_in(&drafts_dir(app)?)?;
     out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     Ok(out)
 }
@@ -87,13 +108,7 @@ fn read_draft(app: &AppHandle, id: &str) -> Option<Draft> {
 }
 
 fn write_draft(app: &AppHandle, draft: &Draft) -> Result<(), String> {
-    let path = draft_file(app, &draft.id)?;
-    let json = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())?;
-    if let Some(fp) = &draft.file_path {
-        fs::write(fp, &draft.content).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    write_draft_in(&drafts_dir(app)?, draft)
 }
 
 /// All saved drafts, newest first. Migrates the legacy single-session file once.
@@ -396,8 +411,23 @@ fn needs_push(updated_at: i64, synced: Option<i64>) -> bool {
     updated_at > synced.unwrap_or(i64::MIN)
 }
 
+/// Adopt a remote draft only when it's STRICTLY newer than the local copy — a tie
+/// (same `updated_at`) means we already have it, so don't re-fetch.
+fn remote_supersedes(remote_updated: i64, local_updated: i64) -> bool {
+    remote_updated > local_updated
+}
+
+/// A remote deletion wins unless the local copy was edited AFTER the delete. A tie
+/// (local == remote) lets the delete win, so a delete and a same-instant edit
+/// converge to "deleted" across devices.
+fn delete_wins(local_updated: i64, remote_deleted_at: i64) -> bool {
+    local_updated <= remote_deleted_at
+}
+
 /// Run a full sync pass. Returns whether anything changed on disk locally (so the
-/// UI can refresh). No-op (Ok(false)) when sync is disabled or unconfigured.
+/// UI can refresh). No-op (Ok(false)) when sync is disabled or unconfigured. Thin
+/// wrapper: resolve config + store dir, run the pure-ish `sync_core`, persist the
+/// ledger (re-reading so a config edit / delete mid-sync isn't clobbered).
 async fn sync_once(app: &AppHandle) -> Result<bool, String> {
     let cfg = read_sync_config(app);
     // Configured (URL + token) == syncing. No separate enable flag.
@@ -405,13 +435,40 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
     let base = normalize_url(&cfg.url);
-    let client = http_client(20)?;
+    let dir = drafts_dir(app)?;
+    let (changed, synced, pushed_deletes) = sync_core(
+        &http_client(20)?,
+        &base,
+        &cfg.token,
+        &dir,
+        cfg.synced.clone(),
+        &cfg.tombstones,
+    )
+    .await?;
 
-    let mut synced = cfg.synced.clone();
-    let mut tombstones = cfg.tombstones.clone();
+    let mut latest = read_sync_config(app);
+    latest.synced = synced;
+    for id in pushed_deletes {
+        latest.tombstones.remove(&id);
+    }
+    write_sync_config(app, &latest)?;
+    Ok(changed)
+}
+
+/// The engine, decoupled from `AppHandle` so it can be driven against a tempdir +
+/// mock HTTP server in tests. Pulls (remote -> local), then pushes (local ->
+/// remote) + DELETEs tombstones. Returns `(changed_on_disk, new_synced_ledger,
+/// pushed_delete_ids)`; the caller persists the ledger.
+async fn sync_core(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+    dir: &Path,
+    mut synced: HashMap<String, i64>,
+    tombstones: &HashMap<String, i64>,
+) -> Result<(bool, HashMap<String, i64>, Vec<String>), String> {
     let mut changed = false;
-
-    let mut local: HashMap<String, Draft> = read_all_drafts(app)?
+    let mut local: HashMap<String, Draft> = read_all_drafts_in(dir)?
         .into_iter()
         .map(|d| (d.id.clone(), d))
         .collect();
@@ -419,7 +476,7 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
     // --- Pull: remote -> local ---
     let list: DraftsList = client
         .get(format!("{base}/drafts"))
-        .bearer_auth(&cfg.token)
+        .bearer_auth(token)
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -431,29 +488,24 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
 
     for entry in list.drafts {
         if entry.deleted {
-            // Remote deletion wins unless the local copy is strictly newer (edited
-            // after the delete -> it will be re-pushed / resurrected below).
             if let Some(l) = local.get(&entry.id) {
-                if l.updated_at <= entry.updated_at {
-                    if let Ok(p) = draft_file(app, &entry.id) {
-                        let _ = fs::remove_file(p);
-                    }
+                if delete_wins(l.updated_at, entry.updated_at) {
+                    let _ = fs::remove_file(draft_path(dir, &entry.id));
                     local.remove(&entry.id);
                     changed = true;
                 }
             }
             synced.insert(entry.id.clone(), entry.updated_at);
-            tombstones.remove(&entry.id);
             continue;
         }
         let need = match local.get(&entry.id) {
             None => true,
-            Some(l) => entry.updated_at > l.updated_at,
+            Some(l) => remote_supersedes(entry.updated_at, l.updated_at),
         };
         if need {
             let resp = client
                 .get(format!("{base}/drafts/{}", entry.id))
-                .bearer_auth(&cfg.token)
+                .bearer_auth(token)
                 .send()
                 .await
                 .map_err(|e| e.to_string())?;
@@ -461,7 +513,7 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
                 let mut remote: Draft = resp.json().await.map_err(|e| e.to_string())?;
                 // Never overwrite the device-local file path; keep the local one.
                 remote.file_path = local.get(&entry.id).and_then(|l| l.file_path.clone());
-                write_draft(app, &remote)?;
+                write_draft_in(dir, &remote)?;
                 synced.insert(entry.id.clone(), remote.updated_at);
                 local.insert(entry.id.clone(), remote);
                 changed = true;
@@ -480,7 +532,7 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
             let body = serde_json::to_string(&up).map_err(|e| e.to_string())?;
             let resp = client
                 .put(format!("{base}/drafts/{id}"))
-                .bearer_auth(&cfg.token)
+                .bearer_auth(token)
                 .header("content-type", "application/json")
                 .body(body)
                 .send()
@@ -497,7 +549,7 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
     for (id, at) in tombstones.iter() {
         let ok = client
             .delete(format!("{base}/drafts/{id}"))
-            .bearer_auth(&cfg.token)
+            .bearer_auth(token)
             .send()
             .await
             .map(|r| r.status().is_success())
@@ -508,17 +560,7 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
         }
     }
 
-    // Persist only the ledger; re-read so we don't clobber url/token/enabled — or a
-    // deletion recorded mid-sync — that the user may have changed meanwhile. Only
-    // the tombstones we actually pushed are cleared.
-    let mut latest = read_sync_config(app);
-    latest.synced = synced;
-    for id in pushed_deletes {
-        latest.tombstones.remove(&id);
-    }
-    write_sync_config(app, &latest)?;
-
-    Ok(changed)
+    Ok((changed, synced, pushed_deletes))
 }
 
 /// Run a sync pass in the background. Serialized by `SyncState` so passes never
@@ -1143,6 +1185,227 @@ mod tests {
         let json = serde_json::to_string(&view).unwrap();
         assert!(!json.contains("secret"));
         assert!(json.contains("\"has_token\":true"));
+    }
+
+    #[test]
+    fn remote_supersedes_only_when_strictly_newer() {
+        assert!(remote_supersedes(11, 10)); // remote newer -> adopt
+        assert!(!remote_supersedes(10, 10)); // tie -> already have it, don't re-fetch
+        assert!(!remote_supersedes(9, 10)); // local newer -> keep local (push handles it)
+    }
+
+    #[test]
+    fn delete_wins_unless_local_edited_after() {
+        assert!(delete_wins(10, 10)); // tie -> delete wins (converge to deleted)
+        assert!(delete_wins(5, 10)); // local older than delete -> delete
+        assert!(!delete_wins(11, 10)); // local edited after delete -> resurrect
+    }
+
+    // --- integration: sync_core against a mock worker on a tempdir ---
+
+    use tempfile::TempDir;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn mk_draft(id: &str, content: &str, updated_at: i64) -> Draft {
+        Draft {
+            id: id.into(),
+            content: content.into(),
+            updated_at,
+            ..Default::default()
+        }
+    }
+
+    fn drafts_list(entries: serde_json::Value) -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(serde_json::json!({ "drafts": entries }))
+    }
+
+    #[tokio::test]
+    async fn sync_core_pushes_a_new_local_draft() {
+        let dir = TempDir::new().unwrap();
+        write_draft_in(dir.path(), &mk_draft("draft-a", "hi", 100)).unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/drafts/draft-a"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let (changed, synced, pushed) = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &HashMap::new(),
+        )
+        .await
+        .unwrap();
+
+        assert!(!changed); // a push doesn't touch local disk
+        assert_eq!(synced.get("draft-a"), Some(&100)); // recorded as synced
+        assert!(pushed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_core_pulls_a_new_remote_draft() {
+        let dir = TempDir::new().unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(
+                serde_json::json!([{ "id": "draft-b", "updatedAt": 200, "deleted": false }]),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/drafts/draft-b"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "draft-b", "title": "", "content": "from remote",
+                "file_path": null, "created_at": 1, "updated_at": 200
+            })))
+            .mount(&server)
+            .await;
+
+        let (changed, synced, _) = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &HashMap::new(),
+        )
+        .await
+        .unwrap();
+
+        assert!(changed); // wrote a new local file
+        assert_eq!(synced.get("draft-b"), Some(&200));
+        let on_disk = read_all_drafts_in(dir.path()).unwrap();
+        assert_eq!(on_disk.len(), 1);
+        assert_eq!(on_disk[0].content, "from remote");
+    }
+
+    #[tokio::test]
+    async fn sync_core_applies_a_remote_delete() {
+        let dir = TempDir::new().unwrap();
+        write_draft_in(dir.path(), &mk_draft("draft-d", "old", 100)).unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(
+                serde_json::json!([{ "id": "draft-d", "updatedAt": 200, "deleted": true }]),
+            ))
+            .mount(&server)
+            .await;
+
+        let (changed, synced, _) = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &HashMap::new(),
+        )
+        .await
+        .unwrap();
+
+        assert!(changed);
+        assert!(read_all_drafts_in(dir.path()).unwrap().is_empty()); // file removed
+        assert_eq!(synced.get("draft-d"), Some(&200));
+    }
+
+    #[tokio::test]
+    async fn sync_core_resurrects_locally_newer_draft_over_remote_delete() {
+        let dir = TempDir::new().unwrap();
+        write_draft_in(dir.path(), &mk_draft("draft-e", "kept", 300)).unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(
+                serde_json::json!([{ "id": "draft-e", "updatedAt": 200, "deleted": true }]),
+            ))
+            .mount(&server)
+            .await;
+        // local (300) is newer than the delete (200) -> keep and push it back.
+        Mock::given(method("PUT"))
+            .and(path("/drafts/draft-e"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let (changed, synced, _) = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &HashMap::new(),
+        )
+        .await
+        .unwrap();
+
+        assert!(!changed); // file kept, not removed or rewritten
+        assert_eq!(read_all_drafts_in(dir.path()).unwrap().len(), 1);
+        assert_eq!(synced.get("draft-e"), Some(&300)); // pushed
+    }
+
+    #[tokio::test]
+    async fn sync_core_pushes_a_tombstone_delete() {
+        let dir = TempDir::new().unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/drafts/draft-c"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let mut tombstones = HashMap::new();
+        tombstones.insert("draft-c".to_string(), 300i64);
+        let (_, synced, pushed) = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &tombstones,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(pushed, vec!["draft-c".to_string()]);
+        assert_eq!(synced.get("draft-c"), Some(&300));
+    }
+
+    #[tokio::test]
+    async fn sync_core_surfaces_auth_failure() {
+        let dir = TempDir::new().unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let result = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "wrong",
+            dir.path(),
+            HashMap::new(),
+            &HashMap::new(),
+        )
+        .await;
+        assert!(result.is_err()); // 401 on the pull list -> Err (drives sync:status error)
     }
 }
 
