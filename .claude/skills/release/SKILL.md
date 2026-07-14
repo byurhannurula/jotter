@@ -1,5 +1,5 @@
 ---
-name: release-jotter
+name: release
 description: "Release the Jotter macOS/Windows/Linux app. Use whenever the user wants to publish a new version, cut a release, ship an update, bump the version, tag a build, or push a release to GitHub. Covers `pnpm release patch|minor|major`, the GitHub Actions build, publishing the draft release, and the Homebrew tap auto-update."
 ---
 
