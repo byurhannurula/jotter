@@ -40,7 +40,7 @@ guard(out("git rev-parse --abbrev-ref HEAD") !== "main", "release from `main` on
 // docs) are irrelevant to what CI checks out and builds.
 guard(
   !!out("git status --porcelain --untracked-files=no"),
-  "tracked changes not committed — commit or stash first"
+  "tracked changes not committed — commit or stash first",
 );
 if (!dry) run("git pull --ff-only");
 
@@ -48,9 +48,11 @@ if (!dry) run("git pull --ff-only");
 const pkg = JSON.parse(readFileSync(path("package.json"), "utf8"));
 const [maj, min, pat] = pkg.version.split(".").map(Number);
 const next =
-  bump === "major" ? `${maj + 1}.0.0`
-  : bump === "minor" ? `${maj}.${min + 1}.0`
-  : `${maj}.${min}.${pat + 1}`;
+  bump === "major"
+    ? `${maj + 1}.0.0`
+    : bump === "minor"
+      ? `${maj}.${min + 1}.0`
+      : `${maj}.${min}.${pat + 1}`;
 console.log(`\n  ${pkg.version} -> ${next}  (${bump})\n`);
 
 // 2. Write it into every file (targeted replacements → minimal diffs).

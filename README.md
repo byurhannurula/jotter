@@ -29,12 +29,15 @@ Built with [Tauri 2](https://tauri.app) (Rust) + vanilla JS. Tiny bundle, native
 Or grab the latest build from the [**Releases**](https://github.com/byurhannurula/jotter/releases/latest) page — macOS `.dmg`, Windows `.exe`/`.msi`, Linux `.AppImage`/`.deb`/`.rpm`.
 
 ### Homebrew
+
 Install via the Homebrew tap:
+
 ```bash
 brew install --cask byurhannurula/tap/jotter
 ```
 
 Update later with:
+
 ```bash
 brew upgrade --cask jotter
 ```
@@ -43,7 +46,7 @@ brew upgrade --cask jotter
 
 The app isn't code‑signed / notarized (no paid developer accounts), so the OS warns on first launch **regardless of install method**:
 
-- **macOS** — Gatekeeper blocks it. Open **System Settings → Privacy & Security**, scroll to the *"Jotter.app was blocked"* message, and click **Open Anyway** (authenticate, then confirm). It's trusted from then on. Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/Jotter.app`. _(On macOS 14 and earlier you can instead right‑click the app → Open.)_
+- **macOS** — Gatekeeper blocks it. Open **System Settings → Privacy & Security**, scroll to the _"Jotter.app was blocked"_ message, and click **Open Anyway** (authenticate, then confirm). It's trusted from then on. Or, from Terminal: `xattr -dr com.apple.quarantine /Applications/Jotter.app`. _(On macOS 14 and earlier you can instead right‑click the app → Open.)_
 - **Windows** — SmartScreen may warn: **More info → Run anyway**.
 - **Linux** — AppImage: `chmod +x Jotter*.AppImage` then run; or install the `.deb`.
 
@@ -60,8 +63,6 @@ The app isn't code‑signed / notarized (no paid developer accounts), so the OS 
 - **Settings** — a sectioned surface: theme, font, text size, word wrap, editor margins (Cozy/Wide), and a full keyboard‑shortcut reference. Every piece of chrome is show/hide‑able
 - **Native feel** — overlay titlebar, light/dark, sizes to your display on first run then remembers your size
 - Small (~9 MB), fast, and everything stays on your machine
-
-
 
 ## Usage
 
@@ -129,11 +130,11 @@ Shipped:
 - [x] Right-click actions — Rename, Copy Path, Reveal in Finder, Export (md/txt/html)
 - [x] Unified sidebar — saved files alongside drafts
 - [x] In-app auto-update (Tauri updater)
+- [x] [Optional cloud sync](https://github.com/byurhannurula/jotter-cloud) — back up & sync drafts across devices (self‑hostable Worker + R2, opt‑in)
+- [x] Read-only sharing — a private link that renders a note as a clean web page
 
 Under consideration — ideas and PRs welcome:
 
-- [ ] Optional cloud sync — back up & sync drafts across devices (self‑hostable Worker + R2, opt‑in)
-- [ ] Read-only sharing — a private link that renders a note as a clean web page
 - [ ] Edit history — browse and restore earlier versions of a draft
 - [ ] Split view — open two notes side by side
 

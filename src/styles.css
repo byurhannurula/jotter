@@ -1,6 +1,6 @@
 :root {
-  --editor-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
-    system-ui, sans-serif;
+  --editor-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --mono-font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --editor-size: 15px;
   --editor-family: var(--editor-font);
@@ -127,7 +127,9 @@ body.ready .app {
   overflow: hidden;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--hairline);
-  transition: width 0.24s var(--ease), border-right-color 0.24s var(--ease);
+  transition:
+    width 0.24s var(--ease),
+    border-right-color 0.24s var(--ease);
 }
 
 body.sidebar-hidden .sidebar {
@@ -165,7 +167,10 @@ body.sidebar-hidden .sidebar {
   background: transparent;
   color: var(--muted);
   cursor: default;
-  transition: background 0.14s ease, color 0.14s ease, transform 0.1s ease;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease,
+    transform 0.1s ease;
 }
 
 .icon-btn:hover {
@@ -208,7 +213,9 @@ body.sidebar-hidden .sidebar {
   font-size: 12.5px;
   padding: 0 10px 0 28px;
   outline: none;
-  transition: background 0.14s ease, box-shadow 0.14s ease;
+  transition:
+    background 0.14s ease,
+    box-shadow 0.14s ease;
 }
 
 .search:focus {
@@ -393,7 +400,9 @@ body.sidebar-hidden .tabbar {
   background: var(--field-bg);
   cursor: default;
   white-space: nowrap;
-  transition: background 0.14s ease, color 0.14s ease;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
   animation: tab-in 0.18s var(--ease);
 }
 
@@ -433,7 +442,9 @@ body.sidebar-hidden .tabbar {
   color: currentColor;
   opacity: 0.45;
   cursor: default;
-  transition: opacity 0.12s ease, background 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease;
 }
 
 .tab-close svg {
@@ -755,7 +766,9 @@ body.no-preview-btn #preview-toggle {
   font-size: 14px;
   line-height: 1;
   cursor: default;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .find-btn.text {
@@ -838,7 +851,9 @@ body.no-preview-btn #preview-toggle {
   font-size: 17px;
   line-height: 1;
   cursor: default;
-  transition: background 0.14s ease, color 0.14s ease;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
 }
 
 .modal-close:hover {
@@ -903,7 +918,9 @@ body.no-preview-btn #preview-toggle {
   padding: 4px 10px;
   border-radius: 6px;
   cursor: default;
-  transition: background 0.14s ease, color 0.14s ease;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
 }
 
 .seg button:hover {
@@ -1460,7 +1477,9 @@ body.no-preview-btn #preview-toggle {
   padding: 6px 10px;
   border-radius: 6px;
   cursor: default;
-  transition: background 0.1s ease, transform 0.08s ease;
+  transition:
+    background 0.1s ease,
+    transform 0.08s ease;
   animation: ctx-item-in 0.16s var(--ease) both;
 }
 
@@ -1547,7 +1566,9 @@ body.no-preview-btn #preview-toggle {
   padding: 6px 14px;
   border-radius: 8px;
   cursor: default;
-  transition: background 0.12s ease, filter 0.12s ease;
+  transition:
+    background 0.12s ease,
+    filter 0.12s ease;
 }
 
 .prompt-btn:hover {

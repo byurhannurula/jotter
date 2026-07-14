@@ -14,17 +14,6 @@
   "bugs": {
     "url": "https://github.com/byurhannurula/jotter/issues"
   },
-  "keywords": [
-    "notepad",
-    "notes",
-    "text-editor",
-    "markdown",
-    "scratchpad",
-    "drafts",
-    "tauri",
-    "macos",
-    "desktop-app"
-  ],
   "engines": {
     "node": ">=22"
   },
@@ -42,23 +31,34 @@
     "release": "node scripts/release.mjs",
     "prepare": "husky"
   },
-  "lint-staged": {
-    "*.{js,css,html,json,md}": "prettier --write"
-  },
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "markdown-it": "^14.3.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.4",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.8",
     "prettier": "^3.9.5",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
-  }
+  },
+  "lint-staged": {
+    "*.{js,css,html,json,md}": "prettier --write"
+  },
+  "keywords": [
+    "notepad",
+    "notes",
+    "text-editor",
+    "markdown",
+    "scratchpad",
+    "drafts",
+    "tauri",
+    "macos",
+    "desktop-app"
+  ]
 }

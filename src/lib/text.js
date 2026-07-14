@@ -32,7 +32,10 @@ export function draftTitle(d) {
 
 /** One-line preview (text after the first line), bounded for long docs. */
 export function draftPreview(d) {
-  const lines = d.content.slice(0, 600).split("\n").map((l) => l.trim());
+  const lines = d.content
+    .slice(0, 600)
+    .split("\n")
+    .map((l) => l.trim());
   return lines.filter(Boolean).slice(1).join(" ").slice(0, 80);
 }
 
