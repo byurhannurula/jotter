@@ -1,5 +1,5 @@
 ---
-name: release-jotter
+name: release
 description: "Release the Jotter macOS/Windows/Linux app. Use whenever the user wants to publish a new version, cut a release, ship an update, bump the version, tag a build, or push a release to GitHub. Covers `pnpm release patch|minor|major`, the GitHub Actions build, publishing the draft release, and the Homebrew tap auto-update."
 ---
 
@@ -33,17 +33,19 @@ call. In order it:
 
 ## Full release procedure
 
-1. **Land all code first.** Make sure the changes you want in the release are
-   committed and pushed to `main`, and the working tree is clean — the script
-   refuses to run otherwise, so the tag points at the released source.
-2. **Pick the bump.** Note: every version file currently reads `0.1.0` even though
-   v0.2 shipped, so the **first** release should be `pnpm release minor` (→ `0.2.0`)
-   to catch the numbers up; `patch` from there. Never regress the version.
+1. **Land all code first.** Development happens on `dev`; a release ships `main`.
+   Merge `dev` into `main`, make sure the working tree is clean and pushed — the
+   script refuses to run off `main` or with tracked changes, so the tag points at
+   exactly the released source.
+2. **Pick the bump.** `patch` for fixes, `minor` for features, `major` for breaking
+   changes. Never regress the version — tags are immutable once pushed.
 3. **Preview if unsure:** `pnpm release patch --dry-run`.
 4. **Run it:** `pnpm release <bump>`. It bumps, tests, tags, and pushes.
-5. **Watch CI.** `.github/workflows/release.yml` builds macOS (universal),
-   Windows, and Linux installers and creates a **draft** GitHub Release with
-   auto-generated notes (commits since the last tag + the unsigned-install footer).
+5. **Watch CI.** `.github/workflows/release.yml` runs the full suite (`pnpm test` +
+   `cargo test`) on each OS — this is the only place the Rust tests run in CI — then
+   builds macOS (universal), Windows, and Linux installers and creates a **draft**
+   GitHub Release with auto-generated notes (commits since the last tag + the
+   unsigned-install footer).
    ```bash
    gh run watch --repo byurhannurula/jotter
    ```

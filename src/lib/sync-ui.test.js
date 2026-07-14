@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  TOKEN_MASK,
-  isTypedToken,
-  tokenToSave,
-  pillState,
-  verifyResultToPill,
-} from "./sync-ui.js";
+import { TOKEN_MASK, isTypedToken, tokenToSave, pillState, verifyResultToPill } from "./sync-ui.js";
 
 describe("isTypedToken", () => {
   it("is true for a real value", () => expect(isTypedToken("abc123")).toBe(true));
@@ -27,42 +21,68 @@ describe("tokenToSave", () => {
 
 describe("pillState", () => {
   it("shows Connected once verified this session", () => {
-    expect(pillState({ url: "https://x", hasToken: true, typedToken: false, verifiedOk: true }))
-      .toEqual({ label: "Connected", kind: "ok" });
+    expect(
+      pillState({ url: "https://x", hasToken: true, typedToken: false, verifiedOk: true }),
+    ).toEqual({ label: "Connected", kind: "ok" });
   });
   it("shows Configured when a url + stored token exist", () => {
-    expect(pillState({ url: "https://x", hasToken: true, typedToken: false, verifiedOk: false }))
-      .toEqual({ label: "Configured", kind: "set" });
+    expect(
+      pillState({ url: "https://x", hasToken: true, typedToken: false, verifiedOk: false }),
+    ).toEqual({ label: "Configured", kind: "set" });
   });
   it("shows Configured when a url + freshly-typed token exist", () => {
-    expect(pillState({ url: "https://x", hasToken: false, typedToken: true, verifiedOk: false }))
-      .toEqual({ label: "Configured", kind: "set" });
+    expect(
+      pillState({ url: "https://x", hasToken: false, typedToken: true, verifiedOk: false }),
+    ).toEqual({ label: "Configured", kind: "set" });
   });
   it("shows Not configured without a url", () => {
-    expect(pillState({ url: "", hasToken: true, typedToken: false, verifiedOk: false }))
-      .toEqual({ label: "Not configured", kind: "" });
+    expect(pillState({ url: "", hasToken: true, typedToken: false, verifiedOk: false })).toEqual({
+      label: "Not configured",
+      kind: "",
+    });
   });
   it("shows Not configured without any token", () => {
-    expect(pillState({ url: "https://x", hasToken: false, typedToken: false, verifiedOk: false }))
-      .toEqual({ label: "Not configured", kind: "" });
+    expect(
+      pillState({ url: "https://x", hasToken: false, typedToken: false, verifiedOk: false }),
+    ).toEqual({ label: "Not configured", kind: "" });
   });
 });
 
 describe("verifyResultToPill", () => {
   it("Connected with version on success", () => {
-    expect(verifyResultToPill({ ok: true, status: 200, version: "0.1.1" }))
-      .toEqual({ label: "Connected · v0.1.1", kind: "ok" });
+    expect(verifyResultToPill({ ok: true, status: 200, version: "0.1.1" })).toEqual({
+      label: "Connected · v0.1.1",
+      kind: "ok",
+    });
   });
   it("Connected without version", () => {
-    expect(verifyResultToPill({ ok: true, status: 200 }))
-      .toEqual({ label: "Connected", kind: "ok" });
+    expect(verifyResultToPill({ ok: true, status: 200 })).toEqual({
+      label: "Connected",
+      kind: "ok",
+    });
   });
-  it("Invalid token on 401", () => {
-    expect(verifyResultToPill({ ok: false, status: 401 }))
-      .toEqual({ label: "Invalid token", kind: "err" });
+  it("Invalid token on 401 when the worker has a token set", () => {
+    expect(verifyResultToPill({ ok: false, status: 401, configured: true })).toEqual({
+      label: "Invalid token",
+      kind: "err",
+    });
+  });
+  it("Invalid token on 401 when configured is unknown", () => {
+    expect(verifyResultToPill({ ok: false, status: 401 })).toEqual({
+      label: "Invalid token",
+      kind: "err",
+    });
+  });
+  it("Worker has no token set on 401 when configured is false", () => {
+    expect(verifyResultToPill({ ok: false, status: 401, configured: false })).toEqual({
+      label: "Worker has no token set",
+      kind: "err",
+    });
   });
   it("Error <status> otherwise", () => {
-    expect(verifyResultToPill({ ok: false, status: 500 }))
-      .toEqual({ label: "Error 500", kind: "err" });
+    expect(verifyResultToPill({ ok: false, status: 500 })).toEqual({
+      label: "Error 500",
+      kind: "err",
+    });
   });
 });

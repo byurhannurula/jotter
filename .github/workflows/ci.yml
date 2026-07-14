@@ -1,9 +1,18 @@
 name: CI
 
+# Fast, cheap gates on every push/PR. The Rust suite is NOT run here: compiling the
+# Tauri crate is slow (and 10x-billed on macOS), so it runs at release time across
+# all three OSes in release.yml, and `pnpm release` also gates on `cargo test`
+# locally before it tags. Develop on `dev`; `main` is release/deploy-ready.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
+
+# On rapid pushes to the same branch/PR, cancel the superseded run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   js:
@@ -20,13 +29,3 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
-
-  rust-tests:
-    # macOS runner already has WebKit, so the tauri crate compiles without extra deps.
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: cargo test
-        working-directory: src-tauri
-        run: cargo test

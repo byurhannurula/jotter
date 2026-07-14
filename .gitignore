@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Personal Claude Code settings; shared .claude/ (skills, agents) stays committed
+.claude/settings.local.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
