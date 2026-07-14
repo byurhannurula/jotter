@@ -119,9 +119,14 @@ function createBlankDraft() {
 
 // Leading glyphs: a pencil for in-app drafts, a document for saved files.
 // (Cloud / shared markers will slot into the sub-line later, behind their flags.)
-const ICON_DRAFT = `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 3.2l2.3 2.3L6 12.3l-2.7.5.5-2.7z"/></svg>`;
-const ICON_FILE = `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2.2h4.6L12 5.6V13.8H4z"/><path d="M8.4 2.2v3.4h3.4M6 9h4M6 11.3h3"/></svg>`;
-const ICON_CLOSE = `<svg viewBox="3 3 10 10" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>`;
+const ICON_DRAFT = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 21h8"/><path d="m15 5 4 4"/><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg>`;
+const ICON_FILE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>`;
+const ICON_CLOSE = `<svg viewBox="5 5 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
+// Plain cloud (not cloud-upload) — the sidebar "synced" marker.
+const ICON_CLOUD_MARK = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`;
+
+// Ids of drafts backed up to the cloud (drives the sidebar synced marker).
+let syncedIds = new Set();
 
 /** Compact location for a file path: home → ~, and drop the filename. */
 function fileDir(p) {
@@ -167,9 +172,46 @@ function makeItem(d) {
   body.append(title, sub);
 
   li.append(icon, body);
+  const marks = buildDraftMarks(d.id);
+  if (marks) li.append(marks);
   li.addEventListener("click", () => openInTab(d.id));
   li.addEventListener("contextmenu", (e) => openDraftMenu(e, d.id));
   return li;
+}
+
+// Right-aligned status glyphs for a row: cloud (synced). The shared/link marker
+// slots in here in C4. Returns null when there's nothing to show.
+function buildDraftMarks(id) {
+  if (!syncedIds.has(id)) return null;
+  const marks = document.createElement("span");
+  marks.className = "draft-marks";
+  marks.innerHTML = `<span class="draft-mark" title="Synced to cloud">${ICON_CLOUD_MARK}</span>`;
+  return marks;
+}
+
+// Reconcile the synced markers on already-rendered rows without a full re-render
+// (avoids replaying the list entrance animation on every sync).
+function applyDraftMarks() {
+  for (const [id, li] of itemEls) {
+    const existing = li.querySelector(".draft-marks");
+    if (syncedIds.has(id)) {
+      if (!existing) li.append(buildDraftMarks(id));
+    } else if (existing) {
+      existing.remove();
+    }
+  }
+}
+
+// Pull the synced-ids set from Rust and repaint the markers. Cheap; safe when
+// sync is unconfigured (returns an empty set).
+async function refreshSyncedMarks() {
+  try {
+    const ids = await invoke("synced_ids");
+    syncedIds = new Set(ids);
+    applyDraftMarks();
+  } catch {
+    /* leave markers as-is */
+  }
 }
 
 function renderList() {
@@ -993,6 +1035,19 @@ function renderAboutSection() {
 // only on explicit reveal/copy.
 
 let refreshSyncSection = () => {};
+const TOKEN_MASK = "•".repeat(28); // solid dots shown for a stored token
+
+// Show/hide the sidebar Sync button depending on whether cloud sync is configured.
+async function refreshSyncChrome() {
+  const btn = document.getElementById("sidebar-sync");
+  if (!btn) return;
+  try {
+    const cfg = await invoke("get_sync_config");
+    btn.hidden = !(cfg.url && cfg.has_token);
+  } catch {
+    btn.hidden = true;
+  }
+}
 
 function genSyncToken() {
   const b = new Uint8Array(32);
@@ -1001,10 +1056,24 @@ function genSyncToken() {
 }
 
 const EYE_SVG = `<svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 8s2.4-4.3 6.5-4.3S14.5 8 14.5 8 12.1 12.3 8 12.3 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="1.8"/></svg>`;
-const CLOUD_SVG = `<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.6 15a3.6 3.6 0 0 1-.4-7.18A4.3 4.3 0 0 1 13.4 6.9a3.2 3.2 0 0 1-.1 6.1"/></svg>`;
+const CLOUD_UPLOAD_PATHS = `<path d="M12 13v8"/><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="m8 17 4-4 4 4"/>`;
+const CLOUD_SVG = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${CLOUD_UPLOAD_PATHS}</svg>`;
 const COPY_SVG = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H3.5A1.5 1.5 0 0 0 2 4v5.5A1.5 1.5 0 0 0 3.5 11H5"/></svg>`;
 const REFRESH_SVG = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.7"/><path d="M13.4 2.4V5h-2.6"/></svg>`;
 const CHECK_SVG = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>`;
+const STATUS_CLOUD_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${CLOUD_UPLOAD_PATHS}</svg>`;
+
+// Global sync indicator in the editor status bar. Shown only once sync actually
+// runs (sync:status only fires when configured + enabled).
+function setSyncBar(text, kind, title) {
+  const el = document.getElementById("status-sync");
+  if (!el) return;
+  el.hidden = false;
+  el.className = "status-seg status-sync" + (kind ? " " + kind : "");
+  el.innerHTML = STATUS_CLOUD_SVG + '<span class="ssync-label"></span>';
+  el.querySelector(".ssync-label").textContent = text;
+  if (title) el.title = title;
+}
 
 function renderSyncSection() {
   const host = sectionEl("sync");
@@ -1015,7 +1084,7 @@ function renderSyncSection() {
   header.className = "sync-header";
   const title = document.createElement("div");
   title.className = "sync-header-title";
-  title.textContent = "Sync";
+  title.textContent = "Cloud";
   const pill = document.createElement("span");
   pill.className = "sync-pill";
   header.append(title, pill);
@@ -1024,16 +1093,6 @@ function renderSyncSection() {
   // Connection card
   host.append(groupTitle("Connection"));
   const conn = groupCard();
-
-  // Enable toggle
-  const enableRow = groupRow();
-  enableRow.classList.add("sync-row");
-  enableRow.append(rowLabel("Enable sync"));
-  const enableSw = document.createElement("button");
-  enableSw.className = "switch interactive";
-  enableSw.setAttribute("role", "switch");
-  enableRow.append(enableSw);
-  conn.append(enableRow);
 
   // Worker URL
   const urlRow = groupRow();
@@ -1133,11 +1192,11 @@ function renderSyncSection() {
   let hasToken = false;
   let verifiedOk = false;
 
-  const setEnable = (on) => {
-    enableSw.classList.toggle("on", on);
-    enableSw.setAttribute("aria-checked", on ? "true" : "false");
+  // Whether the field holds a real user-entered token (not the masked dots).
+  const isTypedToken = () => {
+    const v = tokenInput.value.trim();
+    return !!v && v !== TOKEN_MASK;
   };
-  const isEnabled = () => enableSw.classList.contains("on");
 
   function setPill(text, kind) {
     if (text !== undefined) {
@@ -1146,21 +1205,21 @@ function renderSyncSection() {
       return;
     }
     if (verifiedOk) return setPill("Connected", "ok");
-    const configured = !!urlInput.value.trim() && (hasToken || !!tokenInput.value.trim());
-    setPill(configured ? "Not verified" : "Not configured", "");
+    const configured = !!urlInput.value.trim() && (hasToken || isTypedToken());
+    setPill(configured ? "Configured" : "Not configured", configured ? "set" : "");
   }
 
   function updateEnabled() {
-    const hasTok = hasToken || !!tokenInput.value.trim();
-    verifyBtn.disabled = !(urlInput.value.trim() && hasTok);
+    const hasTok = hasToken || isTypedToken();
+    const configured = !!urlInput.value.trim() && hasTok;
+    verifyBtn.disabled = !configured;
     copyBtn.disabled = !hasTok;
   }
 
   // The raw token: the field if the user typed/generated one, else fetched from
   // Rust on demand (reveal / copy only).
   async function currentToken() {
-    const v = tokenInput.value.trim();
-    if (v) return v;
+    if (isTypedToken()) return tokenInput.value.trim();
     if (hasToken) {
       try {
         return await invoke("get_sync_token");
@@ -1171,25 +1230,33 @@ function renderSyncSection() {
     return "";
   }
 
-  // Persist current fields. A blank token field sends null so Rust keeps the
-  // stored token (URL/enable edits never wipe it).
+  // Solid masked dots stand in for a stored token so the field isn't empty;
+  // cleared on focus so the user can type a new one.
+  function showMask() {
+    if (hasToken && !isTypedToken()) {
+      tokenInput.type = "password";
+      tokenInput.value = TOKEN_MASK;
+      eyeBtn.classList.remove("on");
+    }
+  }
+
+  // Persist current fields. A blank/masked token sends null so Rust keeps the
+  // stored token (URL edits never wipe it).
   async function save() {
-    const token = tokenInput.value.trim();
+    const token = isTypedToken() ? tokenInput.value.trim() : "";
     await invoke("set_sync_config", {
-      enabled: isEnabled(),
+      enabled: true,
       url: urlInput.value.trim(),
       token: token || null,
     });
     if (token) hasToken = true;
   }
 
-  enableSw.addEventListener("click", async () => {
-    setEnable(!isEnabled());
-    try {
-      await save();
-    } catch {
-      /* ignore; re-shown on next open */
-    }
+  tokenInput.addEventListener("focus", () => {
+    if (tokenInput.value === TOKEN_MASK) tokenInput.value = "";
+  });
+  tokenInput.addEventListener("blur", () => {
+    if (!isTypedToken()) showMask();
   });
 
   const dirty = () => {
@@ -1216,12 +1283,13 @@ function renderSyncSection() {
 
   eyeBtn.addEventListener("click", async () => {
     if (tokenInput.type === "password") {
-      if (!tokenInput.value && hasToken) tokenInput.value = await currentToken();
+      tokenInput.value = await currentToken();
       tokenInput.type = "text";
       eyeBtn.classList.add("on");
     } else {
       tokenInput.type = "password";
       eyeBtn.classList.remove("on");
+      if (!isTypedToken()) showMask();
     }
   });
 
@@ -1243,18 +1311,19 @@ function renderSyncSection() {
       setPill("Unreachable", "err"); // transport failure (DNS/timeout/TLS)
     } finally {
       updateEnabled();
+      refreshSyncChrome(); // config may have changed -> update the sidebar button
     }
   });
 
   async function populate() {
     try {
       const cfg = await invoke("get_sync_config");
-      setEnable(!!cfg.enabled);
       urlInput.value = cfg.url || "";
       hasToken = !!cfg.has_token;
       tokenInput.value = "";
       tokenInput.type = "password";
-      eyeBtn.classList.remove("on");
+      tokenInput.placeholder = "paste or generate";
+      showMask(); // solid dots stand in for a stored token
       verifiedOk = false;
       updateEnabled();
       setPill();
@@ -1265,6 +1334,49 @@ function renderSyncSection() {
 
   refreshSyncSection = populate;
   populate();
+}
+
+// After a sync lands changes on disk, reconcile the in-memory model without
+// clobbering what the user is actively editing. Conservative on deletes: only
+// drops pure in-app drafts (no file_path) that vanished from the store.
+async function refreshFromSync() {
+  let list;
+  try {
+    list = await invoke("list_drafts");
+  } catch {
+    return;
+  }
+  const store = new Map(list.map((d) => [d.id, d]));
+
+  // Store -> model: add new drafts, adopt strictly-newer ones.
+  for (const [id, sd] of store) {
+    const cur = drafts.get(id);
+    if (!cur) {
+      drafts.set(id, sd);
+      continue;
+    }
+    if (sd.updated_at <= cur.updated_at) continue; // ours is same or newer
+    if (id === currentId) {
+      // Don't overwrite an in-progress edit; only adopt if the editor is clean.
+      if (editor.value === cur.content) {
+        drafts.set(id, sd);
+        editor.value = sd.content;
+      }
+    } else {
+      sd.file_path = cur.file_path ?? sd.file_path; // keep the device-local path
+      drafts.set(id, sd);
+    }
+  }
+
+  // Remote deletions: a persisted in-app draft that's gone from the store.
+  for (const id of [...drafts.keys()]) {
+    if (store.has(id) || id === currentId) continue;
+    const d = drafts.get(id);
+    if (isEmpty(d) || d.file_path) continue; // unsaved blank or file-backed: leave it
+    removeDraftFromView(id);
+  }
+
+  renderAll();
 }
 
 function showSection(name) {
@@ -1935,6 +2047,31 @@ async function init() {
       case "about": openSettings("about"); break;
     }
   });
+
+  // Cloud sync status -> status-bar indicator + sidebar-button spinner.
+  // No-op visuals unless a sync actually runs (only fires when configured).
+  await listen("sync:status", (event) => {
+    const p = event.payload || {};
+    const sb = document.getElementById("sidebar-sync");
+    if (sb) sb.classList.toggle("syncing", p.state === "syncing");
+    if (p.state === "syncing") {
+      setSyncBar("Syncing…", "syncing");
+    } else if (p.state === "error") {
+      setSyncBar("Offline", "err", p.message || "");
+    } else {
+      const when = p.at ? new Date(p.at).toLocaleTimeString() : "";
+      setSyncBar("Synced", "", when ? `Last synced ${when}` : "");
+      refreshSyncedMarks(); // a push may have changed synced ids without a local change
+    }
+  });
+  await listen("sync:changed", () => refreshFromSync());
+  document
+    .getElementById("sidebar-sync")
+    .addEventListener("click", () => invoke("sync_now").catch(() => {}));
+  refreshSyncChrome();
+  refreshSyncedMarks();
+  // Launch-time sync a couple seconds after boot (no-op when unconfigured).
+  setTimeout(() => invoke("sync_now").catch(() => {}), 2500);
 
   window.addEventListener("beforeunload", () => {
     const d = drafts.get(currentId);

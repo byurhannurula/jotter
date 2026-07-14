@@ -148,6 +148,7 @@ body.sidebar-hidden .sidebar {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 2px;
   padding: 0 10px;
   user-select: none;
   -webkit-user-select: none;
@@ -259,6 +260,18 @@ body.sidebar-hidden .sidebar {
 .draft-body {
   min-width: 0;
   flex: 1 1 auto;
+}
+/* Right-aligned row status glyphs: cloud (synced), link (shared, C4). */
+.draft-marks {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  color: var(--accent);
+}
+.draft-mark {
+  display: flex;
 }
 
 @keyframes item-in {
@@ -1053,6 +1066,9 @@ body.no-preview-btn #preview-toggle {
   background: currentColor;
   opacity: 0.75;
 }
+.sync-pill.set {
+  color: var(--accent);
+}
 .sync-pill.ok {
   color: #30d158;
 }
@@ -1092,6 +1108,38 @@ body.no-preview-btn #preview-toggle {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* Global sync indicator, pinned to the right of the editor status bar. */
+.status-sync {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.status-sync svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+}
+.status-sync.syncing {
+  opacity: 0.7;
+}
+.status-sync.err {
+  color: #ff453a;
+}
+/* Sidebar Sync-now button: spin the cloud while a sync is running. */
+#sidebar-sync.syncing svg {
+  animation: sidebar-sync-spin 0.9s linear infinite;
+}
+@keyframes sidebar-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  #sidebar-sync.syncing svg {
+    animation: none;
+  }
 }
 /* Fixed-width labels so the URL/token fields share one left edge. */
 .sync-row > .group-label {
