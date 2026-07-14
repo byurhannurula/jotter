@@ -20,6 +20,13 @@ import {
 } from "./lib/text.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
+import {
+  TOKEN_MASK,
+  isTypedToken as isTypedTokenValue,
+  tokenToSave,
+  pillState,
+  verifyResultToPill,
+} from "./lib/sync-ui.js";
 
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
@@ -1067,7 +1074,6 @@ function renderAboutSection() {
 // only on explicit reveal/copy.
 
 let refreshSyncSection = () => {};
-const TOKEN_MASK = "•".repeat(28); // solid dots shown for a stored token
 
 // Refresh whether cloud is configured; toggles the sidebar Sync button and gates
 // the sharing menu entries.
@@ -1226,10 +1232,7 @@ function renderSyncSection() {
   let verifiedOk = false;
 
   // Whether the field holds a real user-entered token (not the masked dots).
-  const isTypedToken = () => {
-    const v = tokenInput.value.trim();
-    return !!v && v !== TOKEN_MASK;
-  };
+  const isTypedToken = () => isTypedTokenValue(tokenInput.value);
 
   function setPill(text, kind) {
     if (text !== undefined) {
@@ -1237,9 +1240,13 @@ function renderSyncSection() {
       pill.className = "sync-pill" + (kind ? " " + kind : "");
       return;
     }
-    if (verifiedOk) return setPill("Connected", "ok");
-    const configured = !!urlInput.value.trim() && (hasToken || isTypedToken());
-    setPill(configured ? "Configured" : "Not configured", configured ? "set" : "");
+    const { label, kind: k } = pillState({
+      url: urlInput.value,
+      hasToken,
+      typedToken: isTypedToken(),
+      verifiedOk,
+    });
+    setPill(label, k);
   }
 
   function updateEnabled() {
@@ -1276,11 +1283,11 @@ function renderSyncSection() {
   // Persist current fields. A blank/masked token sends null so Rust keeps the
   // stored token (URL edits never wipe it).
   async function save() {
-    const token = isTypedToken() ? tokenInput.value.trim() : "";
+    const token = tokenToSave(tokenInput.value);
     await invoke("set_sync_config", {
       enabled: true,
       url: urlInput.value.trim(),
-      token: token || null,
+      token,
     });
     if (token) hasToken = true;
   }
@@ -1332,14 +1339,9 @@ function renderSyncSection() {
     try {
       await save(); // save first; the test reads the stored url + token in Rust
       const r = await invoke("sync_test_connection");
-      if (r.ok) {
-        verifiedOk = true;
-        setPill("Connected" + (r.version ? ` · v${r.version}` : ""), "ok");
-      } else if (r.status === 401) {
-        setPill("Invalid token", "err");
-      } else {
-        setPill(`Error ${r.status}`, "err");
-      }
+      if (r.ok) verifiedOk = true;
+      const { label, kind } = verifyResultToPill(r);
+      setPill(label, kind);
     } catch {
       setPill("Unreachable", "err"); // transport failure (DNS/timeout/TLS)
     } finally {
