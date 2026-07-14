@@ -134,6 +134,19 @@ let sharedById = new Map();
 // Whether a worker URL + token are configured (gates the sharing menu entries).
 let cloudConfigured = false;
 
+// Auto-sync scheduling: fire a sync a short while after edits settle, and back
+// off retries while offline. All triggers just call sync_now; Rust serializes.
+const SYNC_DEBOUNCE_MS = 15000;
+let syncDebounceTimer = null;
+let syncRetryTimer = null;
+let syncFailures = 0;
+
+function scheduleSync() {
+  if (!cloudConfigured) return;
+  clearTimeout(syncDebounceTimer);
+  syncDebounceTimer = setTimeout(() => invoke("sync_now").catch(() => {}), SYNC_DEBOUNCE_MS);
+}
+
 /** Compact location for a file path: home → ~, and drop the filename. */
 function fileDir(p) {
   const dir = p.replace(/[/\\][^/\\]*$/, "") || p;
@@ -428,6 +441,7 @@ async function persist() {
   if (isEmpty(d)) return; // don't write empty untouched blanks
   try {
     await invoke("save_draft", { draft: d });
+    scheduleSync(); // nudge a debounced cloud sync once edits settle
   } catch (err) {
     console.error("save_draft failed:", err);
   }
@@ -2113,9 +2127,16 @@ async function init() {
       setSyncBar("Syncing…", "syncing");
     } else if (p.state === "error") {
       setSyncBar("Offline", "err", p.message || "");
+      // Back off and retry: 15s, 30s, 60s, … capped at 5 minutes.
+      syncFailures += 1;
+      clearTimeout(syncRetryTimer);
+      const delay = Math.min(5 * 60 * 1000, SYNC_DEBOUNCE_MS * 2 ** (syncFailures - 1));
+      syncRetryTimer = setTimeout(() => invoke("sync_now").catch(() => {}), delay);
     } else {
       const when = p.at ? new Date(p.at).toLocaleTimeString() : "";
       setSyncBar("Synced", "", when ? `Last synced ${when}` : "");
+      syncFailures = 0;
+      clearTimeout(syncRetryTimer);
       refreshSyncedMarks(); // a push may have changed synced ids without a local change
     }
   });
@@ -2135,6 +2156,7 @@ async function init() {
       d.content = editor.value;
       invoke("save_draft", { draft: d });
     }
+    if (cloudConfigured) invoke("sync_now").catch(() => {}); // best-effort final sync
   });
 
   focusEnd();
