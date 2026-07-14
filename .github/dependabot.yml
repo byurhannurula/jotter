@@ -6,6 +6,8 @@ version: 2
 updates:
   - package-ecosystem: npm
     directory: "/"
+    # Open PRs against dev; promote to main via the normal dev -> main PR.
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -17,6 +19,7 @@ updates:
 
   - package-ecosystem: cargo
     directory: "/src-tauri"
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
@@ -25,5 +28,6 @@ updates:
 
   - package-ecosystem: github-actions
     directory: "/"
+    target-branch: dev
     schedule:
       interval: weekly
