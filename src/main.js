@@ -124,9 +124,15 @@ const ICON_FILE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" s
 const ICON_CLOSE = `<svg viewBox="5 5 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`;
 // Plain cloud (not cloud-upload) — the sidebar "synced" marker.
 const ICON_CLOUD_MARK = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`;
+// Link — the sidebar "shared" marker.
+const ICON_LINK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
 
 // Ids of drafts backed up to the cloud (drives the sidebar synced marker).
 let syncedIds = new Set();
+// draftId -> { shareId, url } for shared drafts (sidebar link marker + menu).
+let sharedById = new Map();
+// Whether a worker URL + token are configured (gates the sharing menu entries).
+let cloudConfigured = false;
 
 /** Compact location for a file path: home → ~, and drop the filename. */
 function fileDir(p) {
@@ -165,40 +171,40 @@ function makeItem(d) {
   const preview = document.createElement("span");
   preview.className = "preview";
   preview.textContent = draftSubText(d);
+  sub.append(preview);
+  body.append(title, sub);
+
+  // Right column: status markers (top) over the timestamp (bottom).
+  const aside = document.createElement("div");
+  aside.className = "draft-aside";
+  const marks = document.createElement("span");
+  marks.className = "draft-marks";
+  marks.innerHTML = draftMarksHtml(d.id);
   const time = document.createElement("span");
   time.className = "time";
   time.textContent = relTime(d.updated_at);
-  sub.append(preview, time);
-  body.append(title, sub);
+  aside.append(marks, time);
 
-  li.append(icon, body);
-  const marks = buildDraftMarks(d.id);
-  if (marks) li.append(marks);
+  li.append(icon, body, aside);
   li.addEventListener("click", () => openInTab(d.id));
   li.addEventListener("contextmenu", (e) => openDraftMenu(e, d.id));
   return li;
 }
 
-// Right-aligned status glyphs for a row: cloud (synced). The shared/link marker
-// slots in here in C4. Returns null when there's nothing to show.
-function buildDraftMarks(id) {
-  if (!syncedIds.has(id)) return null;
-  const marks = document.createElement("span");
-  marks.className = "draft-marks";
-  marks.innerHTML = `<span class="draft-mark" title="Synced to cloud">${ICON_CLOUD_MARK}</span>`;
-  return marks;
+// The status-glyph markup for a row: cloud (synced) + link (shared). "" if none.
+function draftMarksHtml(id) {
+  let html = "";
+  if (syncedIds.has(id)) html += `<span class="draft-mark" title="Synced to cloud">${ICON_CLOUD_MARK}</span>`;
+  if (sharedById.has(id)) html += `<span class="draft-mark" title="Shared — public link">${ICON_LINK}</span>`;
+  return html;
 }
 
-// Reconcile the synced markers on already-rendered rows without a full re-render
+// Reconcile the markers on already-rendered rows without a full re-render
 // (avoids replaying the list entrance animation on every sync).
 function applyDraftMarks() {
   for (const [id, li] of itemEls) {
-    const existing = li.querySelector(".draft-marks");
-    if (syncedIds.has(id)) {
-      if (!existing) li.append(buildDraftMarks(id));
-    } else if (existing) {
-      existing.remove();
-    }
+    const marks = li.querySelector(".draft-marks");
+    if (marks) marks.innerHTML = draftMarksHtml(id);
   }
 }
 
@@ -211,6 +217,17 @@ async function refreshSyncedMarks() {
     applyDraftMarks();
   } catch {
     /* leave markers as-is */
+  }
+}
+
+// Pull the live share registry from the worker into the local cache + markers.
+async function refreshShares() {
+  try {
+    const map = await invoke("refresh_shares"); // { draftId: { shareId, url } }
+    sharedById = new Map(Object.entries(map));
+    applyDraftMarks();
+  } catch {
+    /* leave shares as-is */
   }
 }
 
@@ -1037,16 +1054,17 @@ function renderAboutSection() {
 let refreshSyncSection = () => {};
 const TOKEN_MASK = "•".repeat(28); // solid dots shown for a stored token
 
-// Show/hide the sidebar Sync button depending on whether cloud sync is configured.
+// Refresh whether cloud is configured; toggles the sidebar Sync button and gates
+// the sharing menu entries.
 async function refreshSyncChrome() {
   const btn = document.getElementById("sidebar-sync");
-  if (!btn) return;
   try {
     const cfg = await invoke("get_sync_config");
-    btn.hidden = !(cfg.url && cfg.has_token);
+    cloudConfigured = !!(cfg.url && cfg.has_token);
   } catch {
-    btn.hidden = true;
+    cloudConfigured = false;
   }
+  if (btn) btn.hidden = !cloudConfigured;
 }
 
 function genSyncToken() {
@@ -1677,15 +1695,52 @@ function openDraftMenu(e, id) {
   const d = drafts.get(id);
   if (!d) return;
   const hasFile = !!d.file_path;
-  showContextMenu(e.clientX, e.clientY, [
+  const items = [
     { label: "Rename…", action: () => renameDraft(id) },
     { label: "Copy Path", action: () => copyText(d.file_path, "Path copied"), disabled: !hasFile },
     { label: "Reveal in Finder", action: () => revealDraft(d.file_path), disabled: !hasFile },
     { separator: true },
     { label: "Export…", action: () => exportDraft(id) },
-    { separator: true },
-    { label: "Delete", action: () => deleteDraft(id) },
-  ]);
+  ];
+  // Sharing entries — only when a worker is configured.
+  if (cloudConfigured) {
+    items.push({ separator: true });
+    if (sharedById.has(id)) {
+      items.push({ label: "Copy Share Link", action: () => copyText(sharedById.get(id).url, "Link copied") });
+      items.push({ label: "Stop Sharing", action: () => stopSharing(id) });
+    } else {
+      items.push({ label: "Share…", action: () => shareDraft(id) });
+    }
+  }
+  items.push({ separator: true }, { label: "Delete", action: () => deleteDraft(id) });
+  showContextMenu(e.clientX, e.clientY, items);
+}
+
+// Create a public link for a draft (snapshotting the latest content) and copy it.
+async function shareDraft(id) {
+  try {
+    if (id === currentId) await flush(); // persist the newest edit before snapshot
+    const info = await invoke("create_share", { id });
+    sharedById.set(id, info);
+    applyDraftMarks();
+    copyText(info.url, "Public link copied — anyone with it can read this note");
+  } catch (err) {
+    console.error("create_share failed:", err);
+    showToast("Couldn't create the share link");
+  }
+}
+
+// Revoke a draft's public link (hard delete — the link 404s immediately).
+async function stopSharing(id) {
+  try {
+    await invoke("revoke_share", { id });
+    sharedById.delete(id);
+    applyDraftMarks();
+    showToast("Sharing stopped — the link no longer works");
+  } catch (err) {
+    console.error("revoke_share failed:", err);
+    showToast("Couldn't stop sharing");
+  }
 }
 
 // --- quick switcher (⌘P) -------------------------------------------------
@@ -2068,8 +2123,9 @@ async function init() {
   document
     .getElementById("sidebar-sync")
     .addEventListener("click", () => invoke("sync_now").catch(() => {}));
-  refreshSyncChrome();
+  await refreshSyncChrome();
   refreshSyncedMarks();
+  refreshShares();
   // Launch-time sync a couple seconds after boot (no-op when unconfigured).
   setTimeout(() => invoke("sync_now").catch(() => {}), 2500);
 

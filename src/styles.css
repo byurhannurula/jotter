@@ -261,13 +261,20 @@ body.sidebar-hidden .sidebar {
   min-width: 0;
   flex: 1 1 auto;
 }
-/* Right-aligned row status glyphs: cloud (synced), link (shared, C4). */
-.draft-marks {
+/* Right column: status glyphs (cloud synced, link shared) on top, time below. */
+.draft-aside {
   flex: 0 0 auto;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 4px;
+}
+.draft-marks {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 1px;
   color: var(--accent);
 }
 .draft-mark {
@@ -317,9 +324,11 @@ body.sidebar-hidden .sidebar {
   text-overflow: ellipsis;
 }
 
-.draft-sub .time {
+.draft-aside .time {
   flex: 0 0 auto;
+  font-size: 11px;
   color: var(--faint);
+  white-space: nowrap;
 }
 
 .draft-empty {
