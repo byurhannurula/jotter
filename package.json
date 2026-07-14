@@ -1,7 +1,7 @@
 {
   "name": "jotter",
   "private": true,
-  "version": "0.2.5",
+  "version": "0.3.0",
   "type": "module",
   "description": "A fast, minimal notepad with an autosaved drafts store, tabs, and markdown preview.",
   "author": "Byurhan Nurula (https://byurhannurula.com/)",
