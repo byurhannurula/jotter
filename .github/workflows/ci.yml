@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  js-tests:
+  js:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -17,8 +17,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      - run: pnpm build
 
   rust-tests:
     # macOS runner already has WebKit, so the tauri crate compiles without extra deps.
