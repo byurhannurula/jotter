@@ -78,6 +78,14 @@ fn read_all_drafts(app: &AppHandle) -> Result<Vec<Draft>, String> {
     Ok(out)
 }
 
+/// Read a single draft from the store by id (O(1), vs scanning the whole store).
+fn read_draft(app: &AppHandle, id: &str) -> Option<Draft> {
+    draft_file(app, id)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<Draft>(&s).ok())
+}
+
 fn write_draft(app: &AppHandle, draft: &Draft) -> Result<(), String> {
     let path = draft_file(app, &draft.id)?;
     let json = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
@@ -323,10 +331,7 @@ async fn sync_test_connection(app: AppHandle) -> Result<TestResult, String> {
     }
     let base = normalize_url(&cfg.url);
     let token = cfg.token;
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = http_client(15)?;
     let resp = client
         .get(format!("{base}/health"))
         .bearer_auth(token)
@@ -400,10 +405,7 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
         return Ok(false);
     }
     let base = normalize_url(&cfg.url);
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = http_client(20)?;
 
     let mut synced = cfg.synced.clone();
     let mut tombstones = cfg.tombstones.clone();
@@ -572,6 +574,172 @@ fn list_drafts(app: AppHandle) -> Result<Vec<Draft>, String> {
 #[tauri::command]
 fn synced_ids(app: AppHandle) -> Vec<String> {
     read_sync_config(&app).synced.into_keys().collect()
+}
+
+// --- Read-only sharing (C4) -------------------------------------------------
+//
+// The worker's D1 is the source of truth for which draft is shared at which URL.
+// The app keeps only a disposable cache (shares.json) so the context menu +
+// sidebar link marker are instant and correct cross-device.
+
+/// One shared draft, as cached and returned to the UI. Holds only a public URL.
+#[derive(Serialize, Deserialize, Clone)]
+struct ShareInfo {
+    #[serde(rename = "shareId")]
+    share_id: String,
+    url: String,
+}
+
+type ShareCache = HashMap<String, ShareInfo>; // draft_id -> ShareInfo
+
+fn shares_file(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("shares.json"))
+}
+
+fn read_shares(app: &AppHandle) -> ShareCache {
+    shares_file(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<ShareCache>(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_shares(app: &AppHandle, cache: &ShareCache) -> Result<(), String> {
+    let path = shares_file(app)?;
+    let json = serde_json::to_string_pretty(cache).map_err(|e| e.to_string())?;
+    fs::write(path, json).map_err(|e| e.to_string())
+}
+
+fn http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Fetch the live share registry from the worker (`GET /shares`) into a cache map.
+async fn fetch_shares(client: &reqwest::Client, base: &str, token: &str) -> Result<ShareCache, String> {
+    #[derive(Deserialize)]
+    struct Row {
+        #[serde(rename = "draftId")]
+        draft_id: String,
+        #[serde(rename = "shareId")]
+        share_id: String,
+        url: String,
+    }
+    #[derive(Deserialize)]
+    struct List {
+        #[serde(default)]
+        shares: Vec<Row>,
+    }
+    let list: List = client
+        .get(format!("{base}/shares"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(list
+        .shares
+        .into_iter()
+        .map(|r| (r.draft_id, ShareInfo { share_id: r.share_id, url: r.url }))
+        .collect())
+}
+
+/// Create (or replace) a draft's public share. Snapshots title + content to the
+/// worker's D1 and returns the URL; updates the local cache.
+#[tauri::command]
+async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
+    let cfg = read_sync_config(&app);
+    if cfg.url.is_empty() || cfg.token.is_empty() {
+        return Err("cloud not configured".into());
+    }
+    let draft = read_draft(&app, &id).ok_or_else(|| "draft not found".to_string())?;
+    let base = normalize_url(&cfg.url);
+
+    #[derive(Serialize)]
+    struct Req<'a> {
+        #[serde(rename = "draftId")]
+        draft_id: &'a str,
+        title: &'a str,
+        content: &'a str,
+    }
+    #[derive(Deserialize)]
+    struct Resp {
+        #[serde(rename = "shareId")]
+        share_id: String,
+        url: String,
+    }
+    let resp = http_client(15)?
+        .post(format!("{base}/share"))
+        .bearer_auth(&cfg.token)
+        .json(&Req { draft_id: &id, title: &draft.title, content: &draft.content })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("share failed ({})", resp.status().as_u16()));
+    }
+    let r: Resp = resp.json().await.map_err(|e| e.to_string())?;
+    let info = ShareInfo { share_id: r.share_id, url: r.url };
+
+    let mut cache = read_shares(&app);
+    cache.insert(id, info.clone());
+    write_shares(&app, &cache)?;
+    Ok(info)
+}
+
+/// Revoke a draft's share (hard delete — the `/s/:id` link 404s immediately).
+#[tauri::command]
+async fn revoke_share(app: AppHandle, id: String) -> Result<(), String> {
+    let cfg = read_sync_config(&app);
+    if cfg.url.is_empty() || cfg.token.is_empty() {
+        return Err("cloud not configured".into());
+    }
+    let base = normalize_url(&cfg.url);
+    let client = http_client(15)?;
+    let mut cache = read_shares(&app);
+
+    // Resolve the share id from the cache, else ask the worker.
+    let share_id = match cache.get(&id) {
+        Some(info) => info.share_id.clone(),
+        None => match fetch_shares(&client, &base, &cfg.token).await?.get(&id) {
+            Some(info) => info.share_id.clone(),
+            None => return Ok(()), // nothing to revoke
+        },
+    };
+    let resp = client
+        .delete(format!("{base}/share/{share_id}"))
+        .bearer_auth(&cfg.token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    // 2xx = revoked; 404 = already gone. Anything else means the share may still
+    // be live, so keep the cache entry and surface the failure to the UI.
+    if !resp.status().is_success() && resp.status().as_u16() != 404 {
+        return Err(format!("revoke failed ({})", resp.status().as_u16()));
+    }
+    cache.remove(&id);
+    write_shares(&app, &cache)?;
+    Ok(())
+}
+
+/// Refresh the local share cache from the worker (source of truth). Returns the
+/// full map for the UI. No-op (empty) when unconfigured.
+#[tauri::command]
+async fn refresh_shares(app: AppHandle) -> Result<ShareCache, String> {
+    let cfg = read_sync_config(&app);
+    if cfg.url.is_empty() || cfg.token.is_empty() {
+        return Ok(ShareCache::new());
+    }
+    let base = normalize_url(&cfg.url);
+    let map = fetch_shares(&http_client(15)?, &base, &cfg.token).await?;
+    write_shares(&app, &map)?;
+    Ok(map)
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
@@ -822,7 +990,10 @@ pub fn run() {
             sync_test_connection,
             sync_now,
             list_drafts,
-            synced_ids
+            synced_ids,
+            create_share,
+            revoke_share,
+            refresh_shares
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
