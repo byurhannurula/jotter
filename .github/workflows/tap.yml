@@ -36,7 +36,7 @@ jobs:
 
       - name: Checkout tap
         if: steps.dmg.outputs.sha != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: byurhannurula/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
