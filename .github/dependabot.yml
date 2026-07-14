@@ -1,0 +1,29 @@
+version: 2
+
+# Weekly dependency + security update PRs. A short cooldown mirrors the pnpm
+# supply-chain policy (minimumReleaseAge) so brand-new releases aren't proposed
+# before they've had time to be vetted.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: cargo
+    directory: "/src-tauri"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
