@@ -42,6 +42,7 @@ Keep both green before committing. Pure, testable logic belongs in `src/lib/text
 ## Architecture
 
 **Frontend (`src/`)**
+
 - `main.js` — all app logic: `drafts` Map + `openTabs[]`, tab/draft actions, find &
   replace, markdown preview (per-tab), the settings registry, quick switcher, status
   bar, and soft-delete. One file on purpose; keep it organized by the existing
@@ -51,6 +52,7 @@ Keep both green before committing. Pure, testable logic belongs in `src/lib/text
 - `index.html` / `styles.css`.
 
 **Rust host (`src-tauri/src/lib.rs`)**
+
 - Drafts-store commands: `init_store`, `save_draft`, `delete_draft`, `read_text_file`.
 - Native menu built once in `build_menu`; menu clicks `emit("menu", <id>)` to the
   webview, handled by the `listen("menu", …)` switch in `main.js`.
@@ -82,6 +84,7 @@ the sidebar. Autosave writes ~400 ms after the last keystroke. `⌘S` also write
 ## Performance
 
 The editor must stay snappy on large pastes/docs. Keep these invariants:
+
 - Per-keystroke work is cheap; heavy UI updates are coalesced to one
   `requestAnimationFrame` (`flushUi`). Don't add per-keystroke IPC or full re-renders.
 - Read `editor.value` at most once per frame; prefer the model's `d.content` elsewhere.

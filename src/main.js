@@ -1,23 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  ask,
-  open as openDialog,
-  save as saveDialog,
-} from "@tauri-apps/plugin-dialog";
+import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import MarkdownIt from "markdown-it";
-import {
-  baseName,
-  draftTitle,
-  draftPreview,
-  isEmpty,
-  relTime,
-  findMatches,
-} from "./lib/text.js";
+import { baseName, draftTitle, draftPreview, isEmpty, relTime, findMatches } from "./lib/text.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
 import {
@@ -158,9 +147,7 @@ function scheduleSync() {
 /** Compact location for a file path: home → ~, and drop the filename. */
 function fileDir(p) {
   const dir = p.replace(/[/\\][^/\\]*$/, "") || p;
-  return dir
-    .replace(/^(?:\/Users|\/home)\/[^/]+/, "~")
-    .replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~");
+  return dir.replace(/^(?:\/Users|\/home)\/[^/]+/, "~").replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~");
 }
 
 /** Sidebar/switcher sub-line: a saved file always shows its folder; an in-app
@@ -215,8 +202,10 @@ function makeItem(d) {
 // The status-glyph markup for a row: cloud (synced) + link (shared). "" if none.
 function draftMarksHtml(id) {
   let html = "";
-  if (syncedIds.has(id)) html += `<span class="draft-mark" title="Synced to cloud">${ICON_CLOUD_MARK}</span>`;
-  if (sharedById.has(id)) html += `<span class="draft-mark" title="Shared — public link">${ICON_LINK}</span>`;
+  if (syncedIds.has(id))
+    html += `<span class="draft-mark" title="Synced to cloud">${ICON_CLOUD_MARK}</span>`;
+  if (sharedById.has(id))
+    html += `<span class="draft-mark" title="Shared — public link">${ICON_LINK}</span>`;
   return html;
 }
 
@@ -397,8 +386,7 @@ function updateStatus() {
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   const chars = text.length;
   countEl.textContent =
-    `${words} ${words === 1 ? "word" : "words"} · ` +
-    `${chars} ${chars === 1 ? "char" : "chars"}`;
+    `${words} ${words === 1 ? "word" : "words"} · ` + `${chars} ${chars === 1 ? "char" : "chars"}`;
 
   if (previewTabs.has(currentId)) {
     posEl.textContent = "Preview";
@@ -622,10 +610,10 @@ async function deleteDraft(id) {
 
   // Confirm mode: block on a native dialog, then remove from disk immediately.
   if (getSetting("del") === "confirm") {
-    const confirmed = await ask(
-      `Delete "${draftTitle(d)}"? This can't be undone.`,
-      { title: "Delete draft", kind: "warning" }
-    );
+    const confirmed = await ask(`Delete "${draftTitle(d)}"? This can't be undone.`, {
+      title: "Delete draft",
+      kind: "warning",
+    });
     if (!confirmed) return;
     await invoke("delete_draft", { id }).catch((e) => console.error(e));
     removeDraftFromView(id);
@@ -668,9 +656,7 @@ function flushUi() {
   if (!d) return;
   d.content = editor.value; // read the textarea once per frame, not per event
 
-  const tabTitle = tabsEl.querySelector(
-    `.tab[data-id="${CSS.escape(currentId)}"] .tab-title`
-  );
+  const tabTitle = tabsEl.querySelector(`.tab[data-id="${CSS.escape(currentId)}"] .tab-title`);
   if (tabTitle) tabTitle.textContent = draftTitle(d);
 
   updateWindowTitle();
@@ -758,10 +744,7 @@ function applyTheme(v) {
   else document.documentElement.dataset.theme = v;
 }
 function applyFont(v) {
-  document.documentElement.style.setProperty(
-    "--editor-family",
-    FONTS[v] || FONTS.system
-  );
+  document.documentElement.style.setProperty("--editor-family", FONTS[v] || FONTS.system);
 }
 function applySize(v) {
   document.documentElement.style.setProperty("--editor-size", `${v}px`);
@@ -786,43 +769,113 @@ function applyDelete() {}
 // ("seg", the default) or an on/off "toggle" switch.
 const SETTINGS = {
   theme: {
-    section: "general", label: "Appearance", def: "system", apply: applyTheme,
-    options: [["system", "System"], ["light", "Light"], ["dark", "Dark"]],
+    section: "general",
+    label: "Appearance",
+    def: "system",
+    apply: applyTheme,
+    options: [
+      ["system", "System"],
+      ["light", "Light"],
+      ["dark", "Dark"],
+    ],
   },
   del: {
-    section: "general", label: "On delete", def: "undo", apply: applyDelete,
-    options: [["undo", "Undo toast"], ["confirm", "Confirm"]],
+    section: "general",
+    label: "On delete",
+    def: "undo",
+    apply: applyDelete,
+    options: [
+      ["undo", "Undo toast"],
+      ["confirm", "Confirm"],
+    ],
   },
   previewBtn: {
-    section: "general", label: "Preview button", def: "on", apply: applyPreviewBtn,
+    section: "general",
+    label: "Preview button",
+    def: "on",
+    apply: applyPreviewBtn,
     control: "toggle",
   },
   font: {
-    section: "editor", label: "Font", def: "system", apply: applyFont,
-    options: [["system", "System"], ["serif", "Serif"], ["mono", "Mono"], ["rounded", "Rounded"]],
+    section: "editor",
+    label: "Font",
+    def: "system",
+    apply: applyFont,
+    options: [
+      ["system", "System"],
+      ["serif", "Serif"],
+      ["mono", "Mono"],
+      ["rounded", "Rounded"],
+    ],
   },
   size: {
-    section: "editor", label: "Text size", def: "15.5", apply: applySize,
-    options: [["14", "Small"], ["15.5", "Medium"], ["17", "Large"]],
+    section: "editor",
+    label: "Text size",
+    def: "15.5",
+    apply: applySize,
+    options: [
+      ["14", "Small"],
+      ["15.5", "Medium"],
+      ["17", "Large"],
+    ],
   },
   wrap: {
-    section: "editor", label: "Word wrap", def: "on", apply: applyWrap,
-    options: [["on", "On"], ["off", "Off"]],
+    section: "editor",
+    label: "Word wrap",
+    def: "on",
+    apply: applyWrap,
+    options: [
+      ["on", "On"],
+      ["off", "Off"],
+    ],
   },
   margins: {
-    section: "editor", label: "Margins", def: "cozy", apply: applyMargins,
-    options: [["cozy", "Cozy"], ["wide", "Wide"]],
+    section: "editor",
+    label: "Margins",
+    def: "cozy",
+    apply: applyMargins,
+    options: [
+      ["cozy", "Cozy"],
+      ["wide", "Wide"],
+    ],
   },
   statusbar: {
-    section: "editor", label: "Status bar", def: "on", apply: applyStatusbar,
+    section: "editor",
+    label: "Status bar",
+    def: "on",
+    apply: applyStatusbar,
     control: "toggle",
   },
 };
 
 const SHORTCUTS = [
-  ["File", [["⌘N / ⌘T", "New tab"], ["⌘O", "Open file"], ["⌘P", "Quick open"], ["⌘S / ⇧⌘S", "Save / Save As"], ["⌘W", "Close tab"], ["⇧⌘T", "Reopen closed tab"]]],
-  ["Edit", [["⌘Z / ⇧⌘Z", "Undo / Redo"], ["⌘F", "Find"], ["⌘G / ⇧⌘G", "Find next / previous"]]],
-  ["View", [["⌘B", "Toggle sidebar"], ["⇧⌘P", "Toggle markdown preview"], ["⌘,", "Settings"]]],
+  [
+    "File",
+    [
+      ["⌘N / ⌘T", "New tab"],
+      ["⌘O", "Open file"],
+      ["⌘P", "Quick open"],
+      ["⌘S / ⇧⌘S", "Save / Save As"],
+      ["⌘W", "Close tab"],
+      ["⇧⌘T", "Reopen closed tab"],
+    ],
+  ],
+  [
+    "Edit",
+    [
+      ["⌘Z / ⇧⌘Z", "Undo / Redo"],
+      ["⌘F", "Find"],
+      ["⌘G / ⇧⌘G", "Find next / previous"],
+    ],
+  ],
+  [
+    "View",
+    [
+      ["⌘B", "Toggle sidebar"],
+      ["⇧⌘P", "Toggle markdown preview"],
+      ["⌘,", "Settings"],
+    ],
+  ],
   ["Tabs", [["⌃Tab / ⌃⇧Tab", "Next / previous tab"]]],
 ];
 
@@ -871,9 +924,7 @@ function settingRow(name) {
     sw.className = "switch interactive";
     sw.id = `set-${name}`;
     sw.setAttribute("role", "switch");
-    sw.addEventListener("click", () =>
-      setSetting(name, getSetting(name) === "on" ? "off" : "on")
-    );
+    sw.addEventListener("click", () => setSetting(name, getSetting(name) === "on" ? "off" : "on"));
     row.append(sw);
   } else {
     const seg = document.createElement("div");
@@ -1061,7 +1112,7 @@ function renderAboutSection() {
       eggClicks = 0;
       showToast(
         "You found the quiet room — made for thoughts that couldn't wait. ↳ keep writing.",
-        { timeout: 7000 }
+        { timeout: 7000 },
       );
     }
   });
@@ -1385,7 +1436,7 @@ async function refreshFromSync() {
     list,
     drafts,
     currentId,
-    editor.value
+    editor.value,
   );
   for (const upd of updates) drafts.set(upd.id, upd);
   if (editorContent !== null) editor.value = editorContent;
@@ -1426,9 +1477,7 @@ function initSettings() {
   for (const r of document.querySelectorAll(".rail-item")) {
     r.addEventListener("click", () => showSection(r.dataset.section));
   }
-  document
-    .getElementById("settings-close")
-    .addEventListener("click", () => closeModal("settings"));
+  document.getElementById("settings-close").addEventListener("click", () => closeModal("settings"));
 }
 
 /** Transient bottom-center message with an optional action button. */
@@ -1621,7 +1670,7 @@ async function revealDraft(path) {
 function escapeHtml(s) {
   return s.replace(
     /[&<>"]/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
   );
 }
 
@@ -1662,8 +1711,7 @@ async function exportDraft(id) {
   if (!d) return;
   const content = id === currentId ? editor.value : d.content;
   const stem =
-    (d.file_path ? baseName(d.file_path).replace(/\.[^.]+$/, "") : draftTitle(d)) ||
-    "Untitled";
+    (d.file_path ? baseName(d.file_path).replace(/\.[^.]+$/, "") : draftTitle(d)) || "Untitled";
   const path = await saveDialog({
     defaultPath: `${stem}.md`,
     filters: [
@@ -1673,9 +1721,7 @@ async function exportDraft(id) {
     ],
   });
   if (!path) return;
-  const contents = /\.html?$/i.test(path)
-    ? exportHtml(draftTitle(d), content)
-    : content;
+  const contents = /\.html?$/i.test(path) ? exportHtml(draftTitle(d), content) : content;
   try {
     await invoke("write_text_file", { path, contents });
     showToast("Exported");
@@ -1702,7 +1748,10 @@ function openDraftMenu(e, id) {
   if (cloudConfigured) {
     items.push({ separator: true });
     if (sharedById.has(id)) {
-      items.push({ label: "Copy Share Link", action: () => copyText(sharedById.get(id).url, "Link copied") });
+      items.push({
+        label: "Copy Share Link",
+        action: () => copyText(sharedById.get(id).url, "Link copied"),
+      });
       items.push({ label: "Stop Sharing", action: () => stopSharing(id) });
     } else {
       items.push({ label: "Share…", action: () => shareDraft(id) });
@@ -1749,9 +1798,7 @@ function switcherMatches(query) {
   return orderedDrafts().filter(
     (d) =>
       isSaved(d) &&
-      (!q ||
-        draftTitle(d).toLowerCase().includes(q) ||
-        d.content.toLowerCase().includes(q))
+      (!q || draftTitle(d).toLowerCase().includes(q) || d.content.toLowerCase().includes(q)),
   );
 }
 
@@ -1777,9 +1824,7 @@ function renderSwitcher(query) {
     t.textContent = draftTitle(d);
     const s = document.createElement("div");
     s.className = "s-sub";
-    s.textContent = `${draftSubText(d)} · ${relTime(
-      d.updated_at
-    )}`;
+    s.textContent = `${draftSubText(d)} · ${relTime(d.updated_at)}`;
     li.append(t, s);
     li.addEventListener("click", () => chooseSwitcher(i));
     li.addEventListener("mousemove", () => setSwitcherSel(i));
@@ -2080,22 +2125,54 @@ async function init() {
 
   await listen("menu", (event) => {
     switch (event.payload) {
-      case "new": newTab(); break;
-      case "open": openFile(); break;
-      case "save": save(); break;
-      case "save_as": saveAs(); break;
-      case "close_tab": closeTab(currentId); break;
-      case "reopen_tab": reopenClosedTab(); break;
-      case "switcher": openSwitcher(); break;
-      case "next_tab": cycleTab(1); break;
-      case "prev_tab": cycleTab(-1); break;
-      case "find": openFind(false); break;
-      case "find_next": find.open ? goNext() : openFind(false); break;
-      case "find_prev": find.open ? goPrev() : openFind(false); break;
-      case "toggle_sidebar": toggleSidebar(); break;
-      case "toggle_preview": togglePreview(); break;
-      case "settings": openSettings("general"); break;
-      case "about": openSettings("about"); break;
+      case "new":
+        newTab();
+        break;
+      case "open":
+        openFile();
+        break;
+      case "save":
+        save();
+        break;
+      case "save_as":
+        saveAs();
+        break;
+      case "close_tab":
+        closeTab(currentId);
+        break;
+      case "reopen_tab":
+        reopenClosedTab();
+        break;
+      case "switcher":
+        openSwitcher();
+        break;
+      case "next_tab":
+        cycleTab(1);
+        break;
+      case "prev_tab":
+        cycleTab(-1);
+        break;
+      case "find":
+        openFind(false);
+        break;
+      case "find_next":
+        find.open ? goNext() : openFind(false);
+        break;
+      case "find_prev":
+        find.open ? goPrev() : openFind(false);
+        break;
+      case "toggle_sidebar":
+        toggleSidebar();
+        break;
+      case "toggle_preview":
+        togglePreview();
+        break;
+      case "settings":
+        openSettings("general");
+        break;
+      case "about":
+        openSettings("about");
+        break;
     }
   });
 

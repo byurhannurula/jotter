@@ -31,12 +31,10 @@ describe("firstLine", () => {
 
 describe("draftTitle", () => {
   it("prefers a user-set title (Rename) over everything", () => {
-    expect(
-      draftTitle({ title: "My Notes", file_path: "/a/report.txt", content: "hi" })
-    ).toBe("My Notes");
-    expect(draftTitle({ title: "  ", file_path: null, content: "first line" })).toBe(
-      "first line"
-    ); // blank title is ignored
+    expect(draftTitle({ title: "My Notes", file_path: "/a/report.txt", content: "hi" })).toBe(
+      "My Notes",
+    );
+    expect(draftTitle({ title: "  ", file_path: null, content: "first line" })).toBe("first line"); // blank title is ignored
   });
   it("prefers the file name", () => {
     expect(draftTitle({ file_path: "/a/report.txt", content: "hi" })).toBe("report.txt");
@@ -54,9 +52,7 @@ describe("draftTitle", () => {
 
 describe("draftPreview", () => {
   it("joins the lines after the first", () => {
-    expect(draftPreview({ content: "Title\nsecond line\nthird" })).toBe(
-      "second line third"
-    );
+    expect(draftPreview({ content: "Title\nsecond line\nthird" })).toBe("second line third");
   });
   it("is empty for single-line content", () => {
     expect(draftPreview({ content: "only line" })).toBe("");
@@ -87,13 +83,24 @@ describe("relTime", () => {
 
 describe("findMatches", () => {
   it("finds all case-insensitive matches", () => {
-    expect(findMatches("aAaA", "a")).toEqual([[0, 1], [1, 2], [2, 3], [3, 4]]);
+    expect(findMatches("aAaA", "a")).toEqual([
+      [0, 1],
+      [1, 2],
+      [2, 3],
+      [3, 4],
+    ]);
   });
   it("respects case sensitivity", () => {
-    expect(findMatches("aAaA", "A", true)).toEqual([[1, 2], [3, 4]]);
+    expect(findMatches("aAaA", "A", true)).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
   });
   it("steps past each match (no overlap)", () => {
-    expect(findMatches("aaaa", "aa")).toEqual([[0, 2], [2, 4]]);
+    expect(findMatches("aaaa", "aa")).toEqual([
+      [0, 2],
+      [2, 4],
+    ]);
   });
   it("returns nothing for an empty query", () => {
     expect(findMatches("abc", "")).toEqual([]);

@@ -12,19 +12,64 @@
       <aside class="sidebar">
         <div class="sidebar-inner">
           <header class="sidebar-head" data-tauri-drag-region>
-            <button id="sidebar-sync" class="icon-btn" title="Sync now" aria-label="Sync now" hidden>
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 13v8"/><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="m8 17 4-4 4 4"/></svg>
+            <button
+              id="sidebar-sync"
+              class="icon-btn"
+              title="Sync now"
+              aria-label="Sync now"
+              hidden
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 13v8" />
+                <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+                <path d="m8 17 4-4 4 4" />
+              </svg>
             </button>
             <button id="new-draft" class="icon-btn" title="New draft (⌘N)" aria-label="New draft">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
             </button>
           </header>
           <div class="search-wrap">
             <svg class="search-icon" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-              <circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.4" fill="none"/>
-              <path d="M10.2 10.2L13.5 13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.4" fill="none" />
+              <path
+                d="M10.2 10.2L13.5 13.5"
+                stroke="currentColor"
+                stroke-width="1.4"
+                stroke-linecap="round"
+              />
             </svg>
-            <input id="search" class="search" type="search" placeholder="Search drafts" spellcheck="false" autocomplete="off" />
+            <input
+              id="search"
+              class="search"
+              type="search"
+              placeholder="Search drafts"
+              spellcheck="false"
+              autocomplete="off"
+            />
           </div>
           <ul id="draft-list" class="draft-list"></ul>
         </div>
@@ -34,28 +79,86 @@
         <header class="tabbar" data-tauri-drag-region>
           <div id="tabs" class="tabs" data-tauri-drag-region></div>
           <button id="new-tab" class="icon-btn tab-new" title="New tab (⌘T)" aria-label="New tab">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              width="15"
+              height="15"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M5 12h14" />
+              <path d="M12 5v14" />
+            </svg>
           </button>
-          <button id="preview-toggle" class="icon-btn" title="Markdown preview (⇧⌘P)" aria-label="Toggle markdown preview">
-            <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4">
-              <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H8v10H3.5A1.5 1.5 0 0 1 2 11.5v-7Z"/>
-              <path d="M8 3h4.5A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5H8" opacity="0.5"/>
+          <button
+            id="preview-toggle"
+            class="icon-btn"
+            title="Markdown preview (⇧⌘P)"
+            aria-label="Toggle markdown preview"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              width="15"
+              height="15"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.4"
+            >
+              <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3H8v10H3.5A1.5 1.5 0 0 1 2 11.5v-7Z" />
+              <path d="M8 3h4.5A1.5 1.5 0 0 1 14 4.5v7a1.5 1.5 0 0 1-1.5 1.5H8" opacity="0.5" />
             </svg>
           </button>
         </header>
         <div id="preview" class="md-view markdown-body" hidden></div>
         <div id="findbar" class="findbar" hidden>
           <div class="find-row">
-            <input id="find-input" class="find-field" type="text" placeholder="Find" spellcheck="false" autocomplete="off" />
+            <input
+              id="find-input"
+              class="find-field"
+              type="text"
+              placeholder="Find"
+              spellcheck="false"
+              autocomplete="off"
+            />
             <span id="find-count" class="find-count"></span>
             <button id="find-case" class="find-btn toggle" title="Match case">Aa</button>
-            <button id="find-prev" class="find-btn" title="Previous (⇧⏎)" aria-label="Previous match">‹</button>
-            <button id="find-next" class="find-btn" title="Next (⏎)" aria-label="Next match">›</button>
-            <button id="find-replace-toggle" class="find-btn" title="Toggle replace" aria-label="Toggle replace">⇄</button>
-            <button id="find-close" class="find-btn" title="Close (Esc)" aria-label="Close">×</button>
+            <button
+              id="find-prev"
+              class="find-btn"
+              title="Previous (⇧⏎)"
+              aria-label="Previous match"
+            >
+              ‹
+            </button>
+            <button id="find-next" class="find-btn" title="Next (⏎)" aria-label="Next match">
+              ›
+            </button>
+            <button
+              id="find-replace-toggle"
+              class="find-btn"
+              title="Toggle replace"
+              aria-label="Toggle replace"
+            >
+              ⇄
+            </button>
+            <button id="find-close" class="find-btn" title="Close (Esc)" aria-label="Close">
+              ×
+            </button>
           </div>
           <div id="find-replace-row" class="find-row" hidden>
-            <input id="replace-input" class="find-field" type="text" placeholder="Replace" spellcheck="false" autocomplete="off" />
+            <input
+              id="replace-input"
+              class="find-field"
+              type="text"
+              placeholder="Replace"
+              spellcheck="false"
+              autocomplete="off"
+            />
             <button id="replace-one" class="find-btn text">Replace</button>
             <button id="replace-all" class="find-btn text">All</button>
           </div>
@@ -83,23 +186,92 @@
         <nav class="settings-rail">
           <div class="rail-title">Settings</div>
           <button class="rail-item" data-section="general">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"
+              />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
             <span>General</span>
           </button>
           <button class="rail-item" data-section="editor">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 21h8"/><path d="m15 5 4 4"/><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M13 21h8" />
+              <path d="m15 5 4 4" />
+              <path
+                d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
+              />
+            </svg>
             <span>Editor</span>
           </button>
           <button class="rail-item" data-section="sync">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 13v8"/><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="m8 17 4-4 4 4"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 13v8" />
+              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+              <path d="m8 17 4-4 4 4" />
+            </svg>
             <span>Cloud</span>
           </button>
           <button class="rail-item" data-section="shortcuts">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M10 8h.01" />
+              <path d="M12 12h.01" />
+              <path d="M14 8h.01" />
+              <path d="M16 12h.01" />
+              <path d="M18 8h.01" />
+              <path d="M6 8h.01" />
+              <path d="M7 16h10" />
+              <path d="M8 12h.01" />
+              <rect width="20" height="16" x="2" y="4" rx="2" />
+            </svg>
             <span>Shortcuts</span>
           </button>
           <button class="rail-item" data-section="about">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 16v-4" />
+              <path d="M12 8h.01" />
+            </svg>
             <span>About</span>
           </button>
         </nav>
