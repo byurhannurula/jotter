@@ -36,7 +36,13 @@
     "ship": "bash install.sh",
     "test": "vitest run",
     "test:watch": "vitest",
-    "release": "node scripts/release.mjs"
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "release": "node scripts/release.mjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,css,html,json,md}": "prettier --write"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -48,6 +54,9 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.8",
+    "prettier": "^3.9.5",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
   }
