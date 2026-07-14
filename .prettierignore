@@ -3,3 +3,4 @@ node_modules
 src-tauri/target
 pnpm-lock.yaml
 LICENSE
+.claude/settings.local.json
