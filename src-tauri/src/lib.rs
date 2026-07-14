@@ -242,12 +242,15 @@ struct SyncConfigView {
 }
 
 /// Result of a `/health` probe. `ok` is true only on HTTP 200; `status` lets the
-/// UI distinguish 401 (bad token) from other failures.
+/// UI distinguish 401 (bad token) from other failures. `configured` comes from the
+/// public `/version` and is `Some(false)` when the worker has no `SYNC_TOKEN` set
+/// (it fails closed), so a 401 means "set your token", not "wrong token".
 #[derive(Serialize)]
 struct TestResult {
     ok: bool,
     status: u16,
     version: Option<String>,
+    configured: Option<bool>,
 }
 
 fn sync_file(app: &AppHandle) -> Result<PathBuf, String> {
@@ -366,10 +369,26 @@ async fn sync_test_connection(app: AppHandle) -> Result<TestResult, String> {
     } else {
         None
     };
+    // A 200 already proves the token is set. On any rejection, ask the public
+    // `/version` whether the worker even has a `SYNC_TOKEN` — so the UI can say
+    // "worker has no token set" instead of blaming the user's token.
+    let configured = if status == 200 {
+        Some(true)
+    } else {
+        match client.get(format!("{base}/version")).send().await {
+            Ok(r) => r
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|v| v.get("configured").and_then(|x| x.as_bool())),
+            Err(_) => None,
+        }
+    };
     Ok(TestResult {
         ok: status == 200,
         status,
         version,
+        configured,
     })
 }
 
@@ -709,6 +728,9 @@ async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
         draft_id: &'a str,
         title: &'a str,
         content: &'a str,
+        // When the note was last edited, so the share page can show an "Updated" line.
+        #[serde(rename = "updatedAt")]
+        updated_at: i64,
     }
     #[derive(Deserialize)]
     struct Resp {
@@ -719,7 +741,12 @@ async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
     let resp = http_client(15)?
         .post(format!("{base}/share"))
         .bearer_auth(&cfg.token)
-        .json(&Req { draft_id: &id, title: &draft.title, content: &draft.content })
+        .json(&Req {
+            draft_id: &id,
+            title: &draft.title,
+            content: &draft.content,
+            updated_at: draft.updated_at,
+        })
         .send()
         .await
         .map_err(|e| e.to_string())?;

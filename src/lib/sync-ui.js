@@ -21,14 +21,18 @@ export function tokenToSave(value) {
 export function pillState({ url, hasToken, typedToken, verifiedOk }) {
   if (verifiedOk) return { label: "Connected", kind: "ok" };
   const configured = !!(url && url.trim()) && (hasToken || typedToken);
-  return configured
-    ? { label: "Configured", kind: "set" }
-    : { label: "Not configured", kind: "" };
+  return configured ? { label: "Configured", kind: "set" } : { label: "Not configured", kind: "" };
 }
 
 /** Map a sync_test_connection result to a pill state. */
 export function verifyResultToPill(r) {
   if (r.ok) return { label: "Connected" + (r.version ? ` · v${r.version}` : ""), kind: "ok" };
-  if (r.status === 401) return { label: "Invalid token", kind: "err" };
+  if (r.status === 401) {
+    // `configured === false` means the worker itself has no SYNC_TOKEN set (it
+    // fails closed), so the fix is on the worker, not the user's token.
+    return r.configured === false
+      ? { label: "Worker has no token set", kind: "err" }
+      : { label: "Invalid token", kind: "err" };
+  }
   return { label: `Error ${r.status}`, kind: "err" };
 }
