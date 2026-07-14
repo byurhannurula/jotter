@@ -140,7 +140,9 @@ fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
 /// Upsert a draft: write its store file and (if named) the on-disk text file.
 #[tauri::command]
 fn save_draft(app: AppHandle, draft: Draft) -> Result<(), String> {
-    write_draft(&app, &draft)
+    write_draft(&app, &draft)?;
+    clear_tombstone(&app, &draft.id); // a re-saved draft is no longer deleted
+    Ok(())
 }
 
 #[tauri::command]
@@ -149,7 +151,30 @@ fn delete_draft(app: AppHandle, id: String) -> Result<(), String> {
     if path.exists() {
         fs::remove_file(path).map_err(|e| e.to_string())?;
     }
+    record_tombstone(&app, &id); // so the deletion propagates on the next sync
     Ok(())
+}
+
+/// Record a local deletion so the next sync pushes a DELETE. No-op unless sync is
+/// configured (a worker URL is set) — nothing to propagate otherwise.
+fn record_tombstone(app: &AppHandle, id: &str) {
+    let mut cfg = read_sync_config(app);
+    if cfg.url.is_empty() {
+        return;
+    }
+    cfg.tombstones.insert(id.to_string(), now_ms());
+    cfg.synced.remove(id);
+    let _ = write_sync_config(app, &cfg);
+}
+
+/// Drop a pending tombstone for a draft that came back (undo / re-save).
+fn clear_tombstone(app: &AppHandle, id: &str) {
+    let mut cfg = read_sync_config(app);
+    if cfg.url.is_empty() || !cfg.tombstones.contains_key(id) {
+        return;
+    }
+    cfg.tombstones.remove(id);
+    let _ = write_sync_config(app, &cfg);
 }
 
 #[tauri::command]
@@ -326,6 +351,227 @@ async fn sync_test_connection(app: AppHandle) -> Result<TestResult, String> {
         status,
         version,
     })
+}
+
+// --- Cloud sync engine (C2) -------------------------------------------------
+//
+// One `sync_once` pass = pull (remote -> local) then push (local -> remote).
+// The Worker is a dumb store; conflict resolution is last-write-wins on
+// `updated_at`. `synced[id]` records the value at the last successful sync of a
+// draft, so a local draft needs pushing when `updated_at > synced[id]`.
+// `tombstones[id]` are local deletions not yet pushed. `file_path` is device-local
+// and never synced (stripped on push, preserved on pull).
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Serialized guard so two syncs never overlap (skip if one is running).
+struct SyncState {
+    running: AtomicBool,
+}
+
+/// One entry from `GET /drafts` (delta listing).
+#[derive(Deserialize)]
+struct RemoteEntry {
+    id: String,
+    #[serde(rename = "updatedAt", default)]
+    updated_at: i64,
+    #[serde(default)]
+    deleted: bool,
+}
+
+#[derive(Deserialize)]
+struct DraftsList {
+    #[serde(default)]
+    drafts: Vec<RemoteEntry>,
+}
+
+/// A local draft needs pushing when its edit is newer than the last synced value
+/// (or it was never synced). Pure, so it's unit-tested.
+fn needs_push(updated_at: i64, synced: Option<i64>) -> bool {
+    updated_at > synced.unwrap_or(i64::MIN)
+}
+
+/// Run a full sync pass. Returns whether anything changed on disk locally (so the
+/// UI can refresh). No-op (Ok(false)) when sync is disabled or unconfigured.
+async fn sync_once(app: &AppHandle) -> Result<bool, String> {
+    let cfg = read_sync_config(app);
+    // Configured (URL + token) == syncing. No separate enable flag.
+    if cfg.url.is_empty() || cfg.token.is_empty() {
+        return Ok(false);
+    }
+    let base = normalize_url(&cfg.url);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut synced = cfg.synced.clone();
+    let mut tombstones = cfg.tombstones.clone();
+    let mut changed = false;
+
+    let mut local: HashMap<String, Draft> = read_all_drafts(app)?
+        .into_iter()
+        .map(|d| (d.id.clone(), d))
+        .collect();
+
+    // --- Pull: remote -> local ---
+    let list: DraftsList = client
+        .get(format!("{base}/drafts"))
+        .bearer_auth(&cfg.token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    for entry in list.drafts {
+        if entry.deleted {
+            // Remote deletion wins unless the local copy is strictly newer (edited
+            // after the delete -> it will be re-pushed / resurrected below).
+            if let Some(l) = local.get(&entry.id) {
+                if l.updated_at <= entry.updated_at {
+                    if let Ok(p) = draft_file(app, &entry.id) {
+                        let _ = fs::remove_file(p);
+                    }
+                    local.remove(&entry.id);
+                    changed = true;
+                }
+            }
+            synced.insert(entry.id.clone(), entry.updated_at);
+            tombstones.remove(&entry.id);
+            continue;
+        }
+        let need = match local.get(&entry.id) {
+            None => true,
+            Some(l) => entry.updated_at > l.updated_at,
+        };
+        if need {
+            let resp = client
+                .get(format!("{base}/drafts/{}", entry.id))
+                .bearer_auth(&cfg.token)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if resp.status().is_success() {
+                let mut remote: Draft = resp.json().await.map_err(|e| e.to_string())?;
+                // Never overwrite the device-local file path; keep the local one.
+                remote.file_path = local.get(&entry.id).and_then(|l| l.file_path.clone());
+                write_draft(app, &remote)?;
+                synced.insert(entry.id.clone(), remote.updated_at);
+                local.insert(entry.id.clone(), remote);
+                changed = true;
+            }
+        }
+    }
+
+    // --- Push: local -> remote ---
+    for (id, d) in local.iter() {
+        if is_orphan(d) {
+            continue; // empty, unnamed scratch — nothing worth syncing
+        }
+        if needs_push(d.updated_at, synced.get(id).copied()) {
+            let mut up = d.clone();
+            up.file_path = None; // device-local; never leaves the machine
+            let body = serde_json::to_string(&up).map_err(|e| e.to_string())?;
+            let resp = client
+                .put(format!("{base}/drafts/{id}"))
+                .bearer_auth(&cfg.token)
+                .header("content-type", "application/json")
+                .body(body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+            if resp.status().is_success() {
+                synced.insert(id.clone(), d.updated_at);
+            }
+        }
+    }
+
+    // Push deletions; keep the tombstone for a later retry if the request fails.
+    let mut pushed_deletes: Vec<String> = Vec::new();
+    for (id, at) in tombstones.iter() {
+        let ok = client
+            .delete(format!("{base}/drafts/{id}"))
+            .bearer_auth(&cfg.token)
+            .send()
+            .await
+            .map(|r| r.status().is_success())
+            .unwrap_or(false);
+        if ok {
+            synced.insert(id.clone(), *at);
+            pushed_deletes.push(id.clone());
+        }
+    }
+
+    // Persist only the ledger; re-read so we don't clobber url/token/enabled — or a
+    // deletion recorded mid-sync — that the user may have changed meanwhile. Only
+    // the tombstones we actually pushed are cleared.
+    let mut latest = read_sync_config(app);
+    latest.synced = synced;
+    for id in pushed_deletes {
+        latest.tombstones.remove(&id);
+    }
+    write_sync_config(app, &latest)?;
+
+    Ok(changed)
+}
+
+/// Run a sync pass in the background. Serialized by `SyncState` so passes never
+/// overlap; emits `sync:status` (syncing/idle/error) and `sync:changed` when
+/// something landed locally.
+#[tauri::command]
+async fn sync_now(app: AppHandle) -> Result<(), String> {
+    // Silent no-op when sync isn't set up, so the launch-time call emits no status
+    // for users who never configured it. Configured (URL + token) == syncing.
+    let cfg = read_sync_config(&app);
+    if cfg.url.is_empty() || cfg.token.is_empty() {
+        return Ok(());
+    }
+    let state = app.state::<SyncState>();
+    if state.running.swap(true, Ordering::SeqCst) {
+        return Ok(()); // a sync is already in flight
+    }
+    let _ = app.emit("sync:status", serde_json::json!({ "state": "syncing" }));
+    let result = sync_once(&app).await;
+    app.state::<SyncState>().running.store(false, Ordering::SeqCst);
+    match result {
+        Ok(changed) => {
+            if changed {
+                let _ = app.emit("sync:changed", ());
+            }
+            let _ = app.emit(
+                "sync:status",
+                serde_json::json!({ "state": "idle", "at": now_ms() }),
+            );
+            Ok(())
+        }
+        Err(e) => {
+            let _ = app.emit(
+                "sync:status",
+                serde_json::json!({ "state": "error", "message": e.clone() }),
+            );
+            Err(e)
+        }
+    }
+}
+
+/// The current store contents (visible drafts), for a post-sync UI refresh.
+/// Unlike `init_store` it neither migrates nor prunes — it just reads.
+#[tauri::command]
+fn list_drafts(app: AppHandle) -> Result<Vec<Draft>, String> {
+    let mut drafts = read_all_drafts(&app)?;
+    drafts.retain(|d| !file_gone(d));
+    Ok(drafts)
+}
+
+/// Ids of drafts present in the sync ledger (backed up to the cloud), for the
+/// sidebar "synced" cloud marker. Empty when sync is unconfigured.
+#[tauri::command]
+fn synced_ids(app: AppHandle) -> Vec<String> {
+    read_sync_config(&app).synced.into_keys().collect()
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
@@ -525,6 +771,9 @@ fn save_window(win: &tauri::WebviewWindow) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(SyncState {
+            running: AtomicBool::new(false),
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -570,7 +819,10 @@ pub fn run() {
             set_sync_config,
             get_sync_config,
             get_sync_token,
-            sync_test_connection
+            sync_test_connection,
+            sync_now,
+            list_drafts,
+            synced_ids
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -693,6 +945,21 @@ mod tests {
         assert!(legacy.enabled);
         assert_eq!(legacy.token, "tok");
         assert!(legacy.tombstones.is_empty());
+    }
+
+    #[test]
+    fn needs_push_when_newer_or_never_synced() {
+        assert!(needs_push(10, None)); // never synced -> push
+        assert!(needs_push(10, Some(5))); // edited since last sync -> push
+        assert!(!needs_push(10, Some(10))); // already in sync -> skip
+        assert!(!needs_push(5, Some(10))); // remote ahead -> skip (pull handles it)
+    }
+
+    #[test]
+    fn normalize_url_trims_space_and_trailing_slashes() {
+        assert_eq!(normalize_url("  https://x.example///  "), "https://x.example");
+        assert_eq!(normalize_url("https://x.example"), "https://x.example");
+        assert_eq!(normalize_url(""), "");
     }
 
     #[test]
