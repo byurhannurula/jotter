@@ -53,6 +53,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # Gate the release on the full suite, on each OS. This is the only place the
+      # Rust tests run in CI (per-commit CI skips them to stay cheap), so a tagged
+      # release is where cross-platform regressions get caught.
+      - name: Test (frontend + Rust)
+        run: |
+          pnpm test
+          cargo test --manifest-path src-tauri/Cargo.toml
+
       # Build release notes automatically: commits since the previous tag + install footer.
       - name: Assemble release notes
         id: notes
