@@ -13,7 +13,7 @@
 
 </div>
 
-Open it and start typing. No "where do you want to save this?" dialog, no account, no cloud. Every scratch is auto‑kept in a local drafts store, so you never lose a note by starting a new one. When a draft graduates into a real file, `⌘S` gives it a home — the only time a save dialog appears.
+Open it and start typing. No "where do you want to save this?" dialog, no account, no cloud by default. Every scratch is auto‑kept in a local drafts store, so you never lose a note by starting a new one. When a draft graduates into a real file, `⌘S` gives it a home — the only time a save dialog appears.
 
 Built with [Tauri 2](https://tauri.app) (Rust) + vanilla JS. Tiny bundle, native WebKit, instant startup.
 
@@ -26,7 +26,7 @@ Built with [Tauri 2](https://tauri.app) (Rust) + vanilla JS. Tiny bundle, native
 
 ### Download
 
-Or grab the latest build from the [**Releases**](https://github.com/byurhannurula/jotter/releases/latest) page — macOS `.dmg`, Windows `.exe`/`.msi`, Linux `.AppImage`/`.deb`/`.rpm`.
+Grab the latest build from the [**Releases**](https://github.com/byurhannurula/jotter/releases/latest) page — macOS `.dmg`, Windows `.exe`/`.msi`, Linux `.AppImage`/`.deb`/`.rpm`.
 
 ### Homebrew
 
@@ -60,9 +60,13 @@ The app isn't code‑signed / notarized (no paid developer accounts), so the OS 
 - **Find & Replace** (`⌘F`)
 - **Status bar** — line/column + word & character count (toggleable)
 - **Soft‑delete** — deleting a draft leaves an Undo, so nothing goes by accident
+- **Right‑click actions** — Rename, Copy Path, Reveal in Finder, and Export a draft to Markdown/txt/HTML
+- **Optional cloud sync** — back up & sync drafts across devices via a [self‑hostable Worker + R2](https://github.com/byurhannurula/jotter-cloud); opt‑in and off by default
+- **Read‑only sharing** — turn a note into a private link that renders it as a clean web page
+- **Auto‑updates** — in‑app updates via the Tauri updater
 - **Settings** — a sectioned surface: theme, font, text size, word wrap, editor margins (Cozy/Wide), and a full keyboard‑shortcut reference. Every piece of chrome is show/hide‑able
 - **Native feel** — overlay titlebar, light/dark, sizes to your display on first run then remembers your size
-- Small (~9 MB), fast, and everything stays on your machine
+- **Local‑first & private** — no account, no telemetry, no analytics; your notes stay on your machine and nothing leaves it unless you explicitly turn on sync. Small (~9 MB) and fast
 
 ## Usage
 
@@ -91,7 +95,7 @@ pnpm ship           # macOS: build + copy Jotter.app to /Applications
 **Tests:**
 
 ```bash
-pnpm test                   # Vitest — pure logic (title/preview/search/…)
+pnpm test                   # Vitest — pure logic (title/preview/search, sync reconcile)
 cd src-tauri && cargo test  # Rust unit tests (store/serde)
 ```
 
@@ -109,12 +113,16 @@ Bumps the version in all four files (`package.json`, `src-tauri/tauri.conf.json`
 ## Project structure
 
 ```
-src/                  frontend (vanilla JS, no framework)
-  main.js             app logic (drafts, tabs, find, settings, preview)
-  lib/text.js         pure helpers (unit-tested)
-  lib/meta.js         app name + author links (edit here for the About dialog)
-src-tauri/src/lib.rs  Rust host: drafts store commands + native menu
-.github/workflows/    cross-platform release CI
+src/                       frontend (vanilla JS, no framework)
+  main.js                  app logic (drafts, tabs, find, settings, preview)
+  styles.css               all UI styling
+  lib/text.js              pure helpers — title/preview/search (unit-tested)
+  lib/sync-reconcile.js    cloud-sync merge logic — local ⇄ remote drafts (unit-tested)
+  lib/sync-ui.js           sync status + settings UI wiring
+  lib/meta.js              app name + author links (edit here for the About dialog)
+src-tauri/src/lib.rs       Rust host: drafts store commands + native menu
+scripts/release.mjs        version bump → tag → push (pnpm release)
+.github/workflows/         cross-platform release CI
 ```
 
 ## Roadmap
