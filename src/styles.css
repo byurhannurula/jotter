@@ -287,6 +287,15 @@ body.sidebar-hidden .sidebar {
 .draft-mark {
   display: flex;
 }
+/* The pin marker reads as its own state, so mute it apart from the accent-colored
+   cloud/link glyphs it sits beside. */
+.draft-mark.pin {
+  color: var(--muted);
+}
+.draft-item.active .draft-mark.pin,
+.draft-item:hover .draft-mark.pin {
+  color: var(--text);
+}
 
 @keyframes item-in {
   from {
@@ -1466,7 +1475,10 @@ body.no-preview-btn #preview-toggle {
 }
 
 .context-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
   width: 100%;
   text-align: left;
   border: none;
@@ -1481,6 +1493,18 @@ body.no-preview-btn #preview-toggle {
     background 0.1s ease,
     transform 0.08s ease;
   animation: ctx-item-in 0.16s var(--ease) both;
+}
+
+/* Right-aligned keyboard-shortcut hint. Muted and non-shrinking so the label
+   truncates before the hint does. */
+.context-accel {
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+.context-item:hover .context-accel {
+  color: var(--muted);
 }
 
 @keyframes ctx-item-in {

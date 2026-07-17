@@ -87,7 +87,11 @@ function isSaved(d) {
 }
 
 function orderedDrafts() {
-  return [...drafts.values()].sort((a, b) => b.updated_at - a.updated_at);
+  // Pinned drafts float to the top; within each group, most-recently-edited first.
+  return [...drafts.values()].sort((a, b) => {
+    if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1;
+    return b.updated_at - a.updated_at;
+  });
 }
 
 function matchesSearch(d) {
@@ -107,6 +111,7 @@ function createBlankDraft() {
     file_path: null,
     created_at: now,
     updated_at: now,
+    pinned: false,
   };
   drafts.set(d.id, d);
   return d;
@@ -123,6 +128,8 @@ const ICON_CLOSE = `<svg viewBox="5 5 14 14" width="14" height="14" fill="none" 
 const ICON_CLOUD_MARK = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>`;
 // Link — the sidebar "shared" marker.
 const ICON_LINK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`;
+// Pin — the sidebar "pinned" marker (filled so it reads as a distinct state).
+const ICON_PIN = `<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>`;
 
 // Ids of drafts backed up to the cloud (drives the sidebar synced marker).
 let syncedIds = new Set();
@@ -159,7 +166,7 @@ function draftSubText(d) {
 
 function makeItem(d) {
   const li = document.createElement("li");
-  li.className = "draft-item" + (d.id === currentId ? " active" : "");
+  li.className = "draft-item" + (d.id === currentId ? " active" : "") + (d.pinned ? " pinned" : "");
   li.dataset.id = d.id;
   li.title = draftTooltip(d);
 
@@ -199,9 +206,12 @@ function makeItem(d) {
   return li;
 }
 
-// The status-glyph markup for a row: cloud (synced) + link (shared). "" if none.
+// The status-glyph markup for a row: pin (pinned) + cloud (synced) + link (shared).
+// "" if none. Pin leads so the primary user-set state reads first.
 function draftMarksHtml(id) {
   let html = "";
+  if (drafts.get(id)?.pinned)
+    html += `<span class="draft-mark pin" title="Pinned">${ICON_PIN}</span>`;
   if (syncedIds.has(id))
     html += `<span class="draft-mark" title="Synced to cloud">${ICON_CLOUD_MARK}</span>`;
   if (sharedById.has(id))
@@ -264,13 +274,27 @@ function renderList() {
 
 function refreshActiveItem() {
   const li = itemEls.get(currentId);
-  if (!drafts.get(currentId) || !li) {
+  const d = drafts.get(currentId);
+  if (!d || !li) {
     renderList();
     return;
   }
   refreshItemInPlace(currentId);
-  // Keep the most-recently-edited draft at the top of the list.
-  if (listEl.firstElementChild !== li) listEl.prepend(li);
+  // Keep the edited draft at the top of *its* group: a pinned draft goes to the
+  // very top; an unpinned one only rises to just below the last pinned row, so
+  // editing it never lifts it above the pins.
+  const anchor = d.pinned ? listEl.firstElementChild : firstUnpinnedRow();
+  if (anchor === li) return; // already at the group top
+  if (anchor) listEl.insertBefore(li, anchor);
+  else listEl.append(li); // no unpinned rows yet — sits right after the pins
+}
+
+/** The first rendered row whose draft isn't pinned (top of the unpinned group). */
+function firstUnpinnedRow() {
+  for (const child of listEl.children) {
+    if (!drafts.get(child.dataset.id)?.pinned) return child;
+  }
+  return null;
 }
 
 // --- tab rendering -------------------------------------------------------
@@ -616,15 +640,23 @@ async function deleteDraft(id) {
     });
     if (!confirmed) return;
     await invoke("delete_draft", { id }).catch((e) => console.error(e));
+    revokeShareOnDelete(id); // a deleted note must not stay live at its public link
     removeDraftFromView(id);
     return;
   }
 
-  // Undo mode: remove from view now, purge from disk after a grace period.
+  // Undo mode: remove from view now, purge from disk after a grace period. The id
+  // stays in pendingDelete until delete_draft actually resolves, so a sync can't
+  // resurrect the draft in the gap between the timer firing and the file being gone.
   removeDraftFromView(id);
-  const timer = setTimeout(() => {
+  const timer = setTimeout(async () => {
+    try {
+      await invoke("delete_draft", { id });
+    } catch (e) {
+      console.error(e);
+    }
     pendingDelete.delete(id);
-    invoke("delete_draft", { id }).catch((e) => console.error(e));
+    revokeShareOnDelete(id); // now that the delete has committed, kill the link too
   }, 6000);
   pendingDelete.set(id, timer);
   showToast(`Deleted "${draftTitle(d)}"`, {
@@ -690,6 +722,7 @@ async function openFile() {
       file_path: path,
       created_at: now,
       updated_at: now,
+      pinned: false,
     };
     drafts.set(d.id, d);
     openTabs.push(d.id);
@@ -874,6 +907,15 @@ const SHORTCUTS = [
       ["⌘B", "Toggle sidebar"],
       ["⇧⌘P", "Toggle markdown preview"],
       ["⌘,", "Settings"],
+    ],
+  ],
+  [
+    "Draft",
+    [
+      ["⌃⌘P", "Pin / unpin"],
+      ["⇧⌘L", "Share / copy link"],
+      ["⇧⌘E", "Export"],
+      ["⌘⌫", "Delete"],
     ],
   ],
   ["Tabs", [["⌃Tab / ⌃⇧Tab", "Next / previous tab"]]],
@@ -1432,6 +1474,11 @@ async function refreshFromSync() {
   } catch {
     return;
   }
+  // A soft-deleted draft is gone from the model but its file lingers on disk for
+  // the ~6s undo grace window. Without this, a sync landing in that window sees the
+  // still-present file as a "new" draft and re-adds it — the note flashes back, then
+  // vanishes on the next sync once the tombstone lands. Skip anything mid-delete.
+  if (pendingDelete.size) list = list.filter((d) => !pendingDelete.has(d.id));
   const { updates, removals, editorContent } = reconcileDrafts(
     list,
     drafts,
@@ -1538,7 +1585,16 @@ function showContextMenu(x, y, items) {
     }
     const b = document.createElement("button");
     b.className = "context-item" + (it.disabled ? " disabled" : "");
-    b.textContent = it.label;
+    const label = document.createElement("span");
+    label.className = "context-label";
+    label.textContent = it.label;
+    b.append(label);
+    if (it.accel) {
+      const kbd = document.createElement("span");
+      kbd.className = "context-accel";
+      kbd.textContent = it.accel;
+      b.append(kbd);
+    }
     b.style.animationDelay = `${i++ * 18}ms`; // gentle stagger on open
     if (!it.disabled) {
       b.addEventListener("click", () => {
@@ -1731,6 +1787,16 @@ async function exportDraft(id) {
   }
 }
 
+// Keyboard-shortcut hints shown in the context menu. These mirror the global
+// accelerators wired in init(); the accelerators act on the *active* draft, while
+// the menu acts on the right-clicked one — the hint is for discoverability.
+const ACCEL = {
+  pin: "⌃⌘P",
+  export: "⇧⌘E",
+  share: "⇧⌘L",
+  delete: "⌘⌫",
+};
+
 /** Open the draft context menu at the event position. */
 function openDraftMenu(e, id) {
   e.preventDefault();
@@ -1738,11 +1804,13 @@ function openDraftMenu(e, id) {
   if (!d) return;
   const hasFile = !!d.file_path;
   const items = [
+    { label: d.pinned ? "Unpin" : "Pin", accel: ACCEL.pin, action: () => togglePin(id) },
+    { separator: true },
     { label: "Rename…", action: () => renameDraft(id) },
     { label: "Copy Path", action: () => copyText(d.file_path, "Path copied"), disabled: !hasFile },
     { label: "Reveal in Finder", action: () => revealDraft(d.file_path), disabled: !hasFile },
     { separator: true },
-    { label: "Export…", action: () => exportDraft(id) },
+    { label: "Export…", accel: ACCEL.export, action: () => exportDraft(id) },
   ];
   // Sharing entries — only when a worker is configured.
   if (cloudConfigured) {
@@ -1750,14 +1818,22 @@ function openDraftMenu(e, id) {
     if (sharedById.has(id)) {
       items.push({
         label: "Copy Share Link",
+        accel: ACCEL.share,
         action: () => copyText(sharedById.get(id).url, "Link copied"),
       });
       items.push({ label: "Stop Sharing", action: () => stopSharing(id) });
     } else {
-      items.push({ label: "Share…", action: () => shareDraft(id) });
+      items.push({ label: "Share…", accel: ACCEL.share, action: () => shareDraft(id) });
     }
   }
-  items.push({ separator: true }, { label: "Delete", action: () => deleteDraft(id) });
+  items.push(
+    { separator: true },
+    {
+      label: "Delete",
+      accel: ACCEL.delete,
+      action: () => deleteDraft(id),
+    },
+  );
   showContextMenu(e.clientX, e.clientY, items);
 }
 
@@ -1775,6 +1851,24 @@ async function shareDraft(id) {
   }
 }
 
+// Toggle a draft's sidebar pin. Pinned state is a synced Draft field, so bumping
+// updated_at makes the change eligible for the next sync push (last-write-wins) —
+// it also floats the row to the top of its group, matching the just-acted-on feel.
+async function togglePin(id) {
+  const d = drafts.get(id);
+  if (!d) return;
+  d.pinned = !d.pinned;
+  d.updated_at = Date.now();
+  try {
+    await invoke("save_draft", { draft: d });
+    scheduleSync();
+  } catch (err) {
+    console.error("pin toggle failed:", err);
+  }
+  renderList(); // re-order + repaint the pin class/marker
+  showToast(d.pinned ? "Pinned to top" : "Unpinned");
+}
+
 // Revoke a draft's public link (hard delete — the link 404s immediately).
 async function stopSharing(id) {
   try {
@@ -1785,6 +1879,19 @@ async function stopSharing(id) {
   } catch (err) {
     console.error("revoke_share failed:", err);
     showToast("Couldn't stop sharing");
+  }
+}
+
+// Silently revoke a share as part of deleting its draft (no toast — the delete
+// already told the story). No-op unless the draft is actually shared. The worker
+// also cascades a revoke when the delete tombstone syncs, so this is the fast path.
+async function revokeShareOnDelete(id) {
+  if (!sharedById.has(id)) return;
+  try {
+    await invoke("revoke_share", { id });
+    sharedById.delete(id);
+  } catch (err) {
+    console.error("revoke on delete failed:", err);
   }
 }
 
@@ -2059,6 +2166,17 @@ function bindBackdrop(id) {
   });
 }
 
+/** True while any overlay (settings / quick-open / prompt) is showing. */
+function anyModalOpen() {
+  return ["settings", "switcher", "prompt"].some((id) => !document.getElementById(id).hidden);
+}
+
+/** True when focus is in a text field, where a keystroke is editing, not a command. */
+function isEditableFocused() {
+  const el = document.activeElement;
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+}
+
 // --- init ----------------------------------------------------------------
 
 async function init() {
@@ -2106,6 +2224,37 @@ async function init() {
     if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
       e.preventDefault();
       cycleTab(e.shiftKey ? -1 : 1);
+    }
+  });
+
+  // Draft-action accelerators (mirrored as hints in the context menu). All act on
+  // the active draft. Keyed off e.code so they're layout- and case-independent, and
+  // inert while a modal is open so they don't act on a draft hidden behind it.
+  document.addEventListener("keydown", (e) => {
+    if (!e.metaKey || e.altKey || anyModalOpen()) return;
+    const id = currentId;
+    const d = drafts.get(id);
+    const saved = !!d && isSaved(d);
+    if (e.shiftKey && !e.ctrlKey && e.code === "KeyL") {
+      // ⇧⌘L — Share, or copy the link if already shared.
+      e.preventDefault();
+      if (cloudConfigured && saved) {
+        if (sharedById.has(id)) copyText(sharedById.get(id).url, "Link copied");
+        else shareDraft(id);
+      }
+    } else if (e.shiftKey && !e.ctrlKey && e.code === "KeyE") {
+      e.preventDefault(); // ⇧⌘E — Export
+      if (saved) exportDraft(id);
+    } else if (e.ctrlKey && !e.shiftKey && e.code === "KeyP") {
+      e.preventDefault(); // ⌃⌘P — Pin / Unpin
+      if (saved) togglePin(id);
+    } else if (!e.shiftKey && !e.ctrlKey && (e.code === "Backspace" || e.code === "Delete")) {
+      // ⌘⌫ — Delete. Never hijack a text field: there ⌘⌫ means delete-to-line-start.
+      if (isEditableFocused()) return;
+      if (saved) {
+        e.preventDefault();
+        deleteDraft(id);
+      }
     }
   });
 

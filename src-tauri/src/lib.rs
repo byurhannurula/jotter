@@ -21,6 +21,10 @@ struct Draft {
     created_at: i64,
     #[serde(default)]
     updated_at: i64,
+    // Sidebar pin. Synced across devices (it rides the draft JSON through R2), so
+    // `#[serde(default)]` keeps older stored/remote drafts loading as unpinned.
+    #[serde(default)]
+    pinned: bool,
 }
 
 fn now_ms() -> i64 {
@@ -149,6 +153,7 @@ fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
                     file_path,
                     created_at: now,
                     updated_at: now,
+                    pinned: false,
                 };
                 write_draft(&app, &draft)?;
                 drafts.push(draft);
