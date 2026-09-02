@@ -25,6 +25,13 @@
   --settings-border: rgba(0, 0, 0, 0.1);
   --sidebar-w: 250px;
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+
+  /* Title-bar geometry. The traffic lights are moved down to match from Rust
+     (see position_traffic_lights in lib.rs) — the bar is NOT shrunk to meet
+     them, so changing --titlebar-h means changing that too. */
+  --titlebar-h: 40px;
+  --chrome-h: 26px;
+  --statusbar-h: 24px;
 }
 
 /* Dark values, shared by system preference and the explicit override. */
@@ -146,7 +153,7 @@ body.sidebar-hidden .sidebar {
 
 .sidebar-head {
   flex: 0 0 auto;
-  height: 40px;
+  height: var(--titlebar-h);
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -160,8 +167,9 @@ body.sidebar-hidden .sidebar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  flex: 0 0 auto;
+  width: var(--chrome-h);
+  height: var(--chrome-h);
   border: none;
   border-radius: 7px;
   background: transparent;
@@ -366,7 +374,7 @@ body.sidebar-hidden .sidebar {
 
 .tabbar {
   flex: 0 0 auto;
-  height: 40px;
+  height: var(--titlebar-h);
   display: flex;
   align-items: center;
   gap: 4px;

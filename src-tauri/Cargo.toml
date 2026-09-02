@@ -36,6 +36,13 @@ tauri-plugin-updater = "2"
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 tauri-plugin-single-instance = "2"
 
+# Used only to lower the macOS traffic lights onto the tab bar's centre line
+# (position_traffic_lights in lib.rs). Both are already in the tree via tao/wry,
+# so this pins no new versions.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+
 [dev-dependencies]
 # Integration tests drive sync_core against a mock HTTP server on a tempdir.
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

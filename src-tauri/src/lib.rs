@@ -894,6 +894,52 @@ fn cli_file_args() -> Vec<String> {
     file_paths_from_args(std::env::args())
 }
 
+/// Lower the macOS traffic lights so they sit on the tab bar's centre line.
+///
+/// AppKit centres the three buttons inside a title-bar container view that is
+/// anchored to the top of the window, so giving that view the tab bar's height
+/// puts the buttons on the same centre line as the tabs. There is no Tauri or
+/// AppKit API for this — the container has to be reached through the close
+/// button's view hierarchy, which is why every step here is best-effort: if a
+/// future macOS reshapes that hierarchy, the lights simply stay where the system
+/// put them instead of the app breaking.
+///
+/// `bar_height` must match `--titlebar-h` in styles.css.
+#[cfg(target_os = "macos")]
+fn position_traffic_lights(window: &tauri::WebviewWindow, bar_height: f64) {
+    use objc2_app_kit::{NSWindow, NSWindowButton};
+
+    let Ok(ptr) = window.ns_window() else { return };
+    if ptr.is_null() {
+        return;
+    }
+
+    // Safety: Tauri hands back the NSWindow for this window, and we only touch
+    // it on the main thread (callers are the setup hook and the event loop).
+    unsafe {
+        let ns_window = &*(ptr as *const NSWindow);
+        let Some(close) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
+            return;
+        };
+        // close -> the buttons' container -> the title-bar container view.
+        let Some(container) = close.superview().and_then(|v| v.superview()) else {
+            return;
+        };
+
+        let window_height = ns_window.frame().size.height;
+        let mut frame = container.frame();
+        frame.size.height = bar_height;
+        frame.origin.y = window_height - bar_height;
+        container.setFrame(frame);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn position_traffic_lights(_window: &tauri::WebviewWindow, _bar_height: f64) {}
+
+/// Height of the app's title-bar row. Keep in sync with `--titlebar-h` in styles.css.
+const TITLEBAR_H: f64 = 40.0;
+
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let about = MenuItemBuilder::with_id("about", "About Jotter").build(app)?;
     let app_menu = SubmenuBuilder::new(app, "Jotter")
@@ -1125,6 +1171,18 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             build_menu(app.handle())?;
             restore_window(app.handle());
+            if let Some(win) = app.get_webview_window("main") {
+                position_traffic_lights(&win, TITLEBAR_H);
+            }
+            // Windows/Linux launch-with-file: the path is a CLI arg, not an
+            // `Opened` event. Buffer it so the frontend picks it up on boot.
+            #[cfg(not(target_os = "macos"))]
+            {
+                let args = cli_file_args();
+                if !args.is_empty() {
+                    deliver_opened_paths(app.handle(), args);
+                }
+            }
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -1182,6 +1240,18 @@ pub fn run() {
             } => {
                 if let Some(win) = app_handle.get_webview_window(&label) {
                     save_window(&win);
+                }
+            }
+            // The traffic lights' container is anchored to the window's top edge by
+            // an absolute y, so every resize needs it recomputed.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Resized(_),
+                ..
+            } => {
+                if let Some(win) = app_handle.get_webview_window(&label) {
+                    position_traffic_lights(&win, TITLEBAR_H);
                 }
             }
             tauri::RunEvent::ExitRequested { .. } => {
