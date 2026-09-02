@@ -422,15 +422,45 @@ fn save_draft(app: AppHandle, draft: Draft) -> Result<Option<i64>, String> {
     Ok(mtime)
 }
 
-/// Flip a stored draft's `cloud` flag, entry only. The text file is not
-/// touched: this is a change to what the store knows, not to the note.
-fn set_cloud_in(dir: &Path, id: &str, on: bool) -> Result<Draft, String> {
+/// Read one stored entry, change it, write it back — entry only, the text
+/// file is never touched. For changes to what the store knows about a note
+/// (its name, its pin, its cloud flag) rather than to the note itself, where
+/// writing the file would put whatever content the store holds over a copy
+/// on disk that may be newer.
+fn update_entry_in(dir: &Path, id: &str, change: impl FnOnce(&mut Draft)) -> Result<Draft, String> {
     let path = draft_path(dir, id);
     let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut d: Draft = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    d.cloud = on;
+    change(&mut d);
     write_entry_in(dir, &d)?;
     Ok(d)
+}
+
+/// Flip a stored draft's `cloud` flag, entry only.
+fn set_cloud_in(dir: &Path, id: &str, on: bool) -> Result<Draft, String> {
+    update_entry_in(dir, id, |d| d.cloud = on)
+}
+
+/// Rename or pin a stored draft without touching its text file. Errs when the
+/// draft is not in the store yet (typed but not autosaved), and the caller
+/// falls back to a full save.
+#[tauri::command]
+fn save_meta(
+    app: AppHandle,
+    id: String,
+    title: String,
+    pinned: bool,
+    updated_at: i64,
+) -> Result<(), String> {
+    let d = update_entry_in(&drafts_dir(&app)?, &id, |d| {
+        d.title = title;
+        d.pinned = pinned;
+        d.updated_at = updated_at;
+    })?;
+    if syncs_to_cloud(&d) {
+        clear_tombstone(&app, &id); // a re-saved draft is no longer deleted
+    }
+    Ok(())
 }
 
 /// Opt a file-backed draft into or out of cloud sync, and settle its tombstone
@@ -1656,6 +1686,7 @@ pub fn run() {
             open_drafts_dir,
             write_conflict_copy,
             set_cloud,
+            save_meta,
             create_share,
             revoke_share,
             refresh_shares,
@@ -1941,6 +1972,32 @@ mod tests {
             canonical(via_link.to_str().unwrap()),
             root.join("real").join("new.txt").to_string_lossy()
         );
+    }
+
+    #[test]
+    fn update_entry_changes_only_the_store_copy() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("note.txt");
+        fs::write(&file, "newer on disk").unwrap();
+        let mut d = draft("older in store", Some(file.to_str().unwrap()));
+        d.id = "n".into();
+        write_entry_in(dir.path(), &d).unwrap();
+
+        let out = update_entry_in(dir.path(), "n", |d| {
+            d.title = "Named".into();
+            d.pinned = true;
+            d.updated_at = 999;
+        })
+        .unwrap();
+        assert_eq!(out.title, "Named");
+        let stored: Draft =
+            serde_json::from_str(&fs::read_to_string(draft_path(dir.path(), "n")).unwrap())
+                .unwrap();
+        assert!(stored.pinned);
+        assert_eq!(stored.updated_at, 999);
+        assert_eq!(stored.content, "older in store"); // content untouched
+        assert_eq!(fs::read_to_string(&file).unwrap(), "newer on disk"); // file untouched
+        assert!(update_entry_in(dir.path(), "missing", |_| {}).is_err());
     }
 
     #[test]

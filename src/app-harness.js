@@ -37,10 +37,14 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
   const mtimes = new Map([...disk.keys()].map((p) => [p, 1000]));
   const saves = [];
   const deletes = [];
+  const events = []; // timestamped notes from tests, alongside the saves
 
   const handlers = {
     init_store: () => [...store.values()].map((d) => ({ ...d })),
-    list_drafts: () => [...store.values()].map((d) => ({ ...d })),
+    list_drafts: () => {
+      events.push({ at: Date.now(), what: "list_drafts" });
+      return [...store.values()].map((d) => ({ ...d }));
+    },
     save_draft: ({ draft }) => {
       // The Rust command refuses when the backing file changed underneath:
       // two known mtimes that differ. A null recorded mtime means "write
@@ -49,7 +53,12 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
         const now = mtimes.get(draft.file_path);
         if (now != null && now !== draft.file_mtime) throw "conflict";
       }
-      saves.push({ id: draft.id, content: draft.content, file_path: draft.file_path });
+      saves.push({
+        id: draft.id,
+        content: draft.content,
+        file_path: draft.file_path,
+        at: Date.now(),
+      });
       store.set(draft.id, { ...draft });
       if (draft.file_path) {
         disk.set(draft.file_path, draft.content);
@@ -57,6 +66,11 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
         return mtimes.get(draft.file_path);
       }
       return null;
+    },
+    save_meta: ({ id, title, pinned, updatedAt }) => {
+      const entry = store.get(id);
+      if (!entry) throw new Error("not in the store yet");
+      store.set(id, { ...entry, title, pinned, updated_at: updatedAt });
     },
     delete_draft: ({ id }) => {
       deletes.push(id);
@@ -93,7 +107,7 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
     mtimes.set(path, (mtimes.get(path) ?? 1000) + 1);
   };
 
-  return { store, disk, mtimes, saves, deletes, editOutside };
+  return { store, disk, mtimes, saves, deletes, events, editOutside };
 }
 
 /** Load a fresh main.js and run its init() against a fresh body.

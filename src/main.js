@@ -2537,8 +2537,27 @@ async function renameDraft(id) {
   if (name === null) return; // cancelled
   d.title = name;
   d.updated_at = Date.now();
-  await saveDraft(d); // the new title has to reach the cloud too
+  await saveMeta(d); // the new title has to reach the cloud too
   renderAll();
+}
+
+/** Write a draft's name, pin and edit time without touching its text or its
+ *  file. A full save here wrote the file too, which on a file changed outside
+ *  the app turned a rename into a conflict. Falls back to a full save for a
+ *  draft the store has not seen yet (typed, not yet autosaved). */
+async function saveMeta(d) {
+  try {
+    await invoke("save_meta", {
+      id: d.id,
+      title: d.title,
+      pinned: !!d.pinned,
+      updatedAt: d.updated_at,
+    });
+    scheduleSync();
+    return true;
+  } catch {
+    return saveDraft(d);
+  }
 }
 
 async function copyText(text, msg) {
@@ -2739,7 +2758,7 @@ async function togglePin(id) {
   if (!d) return;
   d.pinned = !d.pinned;
   d.updated_at = Date.now();
-  await saveDraft(d);
+  await saveMeta(d);
   renderList(); // re-order + repaint the pin class/marker
   showToast(d.pinned ? "Pinned to top" : "Unpinned");
 }

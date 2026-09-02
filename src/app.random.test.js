@@ -118,6 +118,18 @@ class Model {
 function check(model, real, before, savesBefore) {
   const active = real.activeTabId();
   expect(active, "active tab").toBe(model.active);
+  if (real.editor.value !== (model.content.get(model.active) ?? "")) {
+    // Print what the host saw, so a timing-dependent failure can be read.
+    console.log("ORACLE editor mismatch", {
+      active,
+      dirty: model.dirty,
+      now: Date.now(),
+      lastEditAt,
+      saves: real.host.saves.slice(-6),
+      store: real.host.store.get(active),
+      events: real.host.events.slice(-8),
+    });
+  }
   expect(real.editor.value, `editor text for ${active}`).toBe(
     model.content.get(model.active) ?? "",
   );
@@ -167,6 +179,10 @@ function cmd(name, { check: pre = () => true, run }) {
       return pre(m, this.arg);
     }
     async run(m, real) {
+      // The autosave timer runs on wall-clock time. A slow command (a loaded
+      // machine, a GC pause) can let it fire mid-sequence, so the model checks
+      // the clock before and after every command rather than only in Wait.
+      autosaveMayHaveFired(m, real);
       const before = new Map(m.content);
       const savesBefore = real.host.saves.length;
       // What the files' mtimes were when the command started: a write the
@@ -174,6 +190,7 @@ function cmd(name, { check: pre = () => true, run }) {
       // against the values before that write.
       m.mtimesBefore = new Map(real.host.mtimes);
       await run(m, real, this.arg);
+      autosaveMayHaveFired(m, real);
       check(m, real, before, savesBefore);
     }
     toString() {
@@ -186,6 +203,12 @@ const pick = (m, i) => {
   const ids = m.sidebar();
   return ids[i % ids.length];
 };
+
+/** If the autosave delay has passed since the last keystroke, the pending
+ *  edit has been written (or refused): account for it. */
+function autosaveMayHaveFired(m, real) {
+  if (m.dirty !== null && Date.now() - lastEditAt > AUTOSAVE_MS + 40) flushed(m, real);
+}
 
 /** The app tried to write the pending edit. For a file draft whose file moved
  *  on underneath, the write is refused and the conflict toast goes up; the
@@ -295,16 +318,21 @@ const Type = cmd("Type", {
 const Wait = cmd("Wait", {
   run: async (m, real, ms) => {
     await sleep(ms);
-    await settle();
-    if (ms > AUTOSAVE_MS) flushed(m, real); // the autosave fired
+    await settle(); // a long enough wait lets the autosave fire; the wrapper accounts for it
   },
 });
 
 const fresh = (m, id) =>
   !m.stale.has(id) && id !== m.conflict && (m.dirty !== id || !m.file.has(id));
 
+/** Rename and pin write the entry only, unless the store has never seen the
+ *  draft, in which case the app falls back to a full save. */
+function metaWritten(m, real, id) {
+  if (!real.host.store.has(id) && m.dirty === id) flushed(m, real);
+}
+
 const Rename = cmd("Rename", {
-  check: (m, [i]) => m.sidebar().length > 0 && fresh(m, pick(m, i)),
+  check: (m) => m.sidebar().length > 0,
   run: async (m, real, [i, name]) => {
     const id = pick(m, i);
     await real.contextMenu(id, "Rename…");
@@ -313,24 +341,23 @@ const Rename = cmd("Rename", {
     document.getElementById("prompt-ok").click();
     await settle();
     if (!name.trim()) return; // the prompt treats a blank name as cancel
+    const stored = real.host.store.has(id);
     m.title.set(id, name.trim());
     m.touch(id);
-    // Renaming saves the draft as it is in memory, which flushes a pending edit.
-    if (m.dirty === id) flushed(m, real);
-    else wrote(m, real, id);
+    if (!stored) metaWritten(m, real, id);
   },
 });
 
 const Pin = cmd("Pin", {
-  check: (m, i) => m.sidebar().length > 0 && fresh(m, pick(m, i)),
+  check: (m) => m.sidebar().length > 0,
   run: async (m, real, i) => {
     const id = pick(m, i);
+    const stored = real.host.store.has(id);
     await real.contextMenu(id, m.pinned.has(id) ? "Unpin" : "Pin");
     if (m.pinned.has(id)) m.pinned.delete(id);
     else m.pinned.add(id);
     m.touch(id);
-    if (m.dirty === id) flushed(m, real);
-    else wrote(m, real, id);
+    if (!stored) metaWritten(m, real, id);
   },
 });
 
@@ -409,6 +436,7 @@ const SyncChanged = cmd("SyncChanged", {
     const entry = real.host.store.get(id);
     if (!entry) return; // not yet autosaved: nothing for a sync to update
     const text = `synced ${m.clock}`;
+    real.host.events.push({ at: Date.now(), what: "sync store.set", id, text });
     real.host.store.set(id, { ...entry, content: text, updated_at: Date.now() + 1 });
     await emit("sync:changed", null);
     await settle();

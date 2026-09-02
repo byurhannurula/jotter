@@ -373,6 +373,49 @@ describe("keyboard access", () => {
   });
 });
 
+describe("sync landing on the active draft", () => {
+  beforeEach(async () => {
+    app = await boot(seed());
+  });
+
+  it("is adopted once the draft was written by a rename, even before autosave", async () => {
+    // Found by the random-session test: type, rename (which saves the draft in
+    // full because the store had not seen it), then a sync lands.
+    await app.type("x");
+    const id = app.activeTabId();
+    await app.contextMenu(id, "Rename…");
+    document.getElementById("prompt-input").value = "Shopping";
+    document.getElementById("prompt-ok").click();
+    await settle();
+    expect(app.host.store.get(id)?.content).toBe("x");
+    app.host.store.set(id, {
+      ...app.host.store.get(id),
+      content: "from the cloud",
+      updated_at: Date.now() + 5,
+    });
+    await emit("sync:changed", null);
+    await settle();
+    await settle();
+    expect(app.editor.value).toBe("from the cloud");
+  });
+
+  it("is refused while typed text is still waiting for autosave", async () => {
+    await app.clickDraft("draft-a");
+    await app.type("typed, unsaved");
+    app.host.store.set("draft-a", {
+      ...app.host.store.get("draft-a"),
+      content: "from the cloud",
+      updated_at: Date.now() + 5,
+    });
+    await emit("sync:changed", null);
+    await settle();
+    await settle();
+    expect(app.editor.value).toBe("typed, unsaved");
+    await app.autosave();
+    expect(app.host.store.get("draft-a").content).toBe("typed, unsaved");
+  });
+});
+
 describe("a mixed session", () => {
   it("always shows the active draft's text and never loses an edit", async () => {
     app = await boot(seed());
