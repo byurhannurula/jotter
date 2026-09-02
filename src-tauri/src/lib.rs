@@ -177,11 +177,47 @@ fn read_all_drafts_in(dir: &Path) -> Result<Vec<Draft>, String> {
     Ok(out)
 }
 
+/// Write `contents` to `path` without ever leaving it half-written.
+///
+/// `fs::write` truncates the target and then streams into it, so a crash, a
+/// full disk, or a sync client reading mid-write can see a truncated file. For
+/// an app whose promise is that nothing is lost, that is the wrong trade. Write
+/// a temp file beside the target instead and rename over it: rename is atomic
+/// within a filesystem, so a reader sees either the old file or the new one.
+///
+/// The temp file is a sibling on purpose — a rename across filesystems fails,
+/// and the target's own directory is the only place guaranteed to be on the
+/// same one.
+fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let dir = path.parent().ok_or("path has no parent directory")?;
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("path has no file name")?;
+    let tmp = dir.join(format!(".{name}.{}.tmp", std::process::id()));
+
+    let write = || -> std::io::Result<()> {
+        let mut f = fs::File::create(&tmp)?;
+        std::io::Write::write_all(&mut f, contents)?;
+        f.sync_all()?; // the bytes must be on disk before the rename points at them
+        Ok(())
+    };
+    if let Err(e) = write() {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    Ok(())
+}
+
 fn write_draft_in(dir: &Path, draft: &Draft) -> Result<(), String> {
     let json = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
-    fs::write(draft_path(dir, &draft.id), json).map_err(|e| e.to_string())?;
+    write_atomic(&draft_path(dir, &draft.id), json.as_bytes())?;
     if let Some(fp) = &draft.file_path {
-        fs::write(fp, &draft.content).map_err(|e| e.to_string())?;
+        write_atomic(Path::new(fp), draft.content.as_bytes())?;
     }
     Ok(())
 }
