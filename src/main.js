@@ -18,6 +18,7 @@ import {
 } from "./lib/text.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
+import * as tabModel from "./lib/tabs.js";
 import {
   TOKEN_MASK,
   isTypedToken as isTypedTokenValue,
@@ -563,6 +564,48 @@ async function flush() {
 }
 
 // --- tab / draft actions -------------------------------------------------
+//
+// The transitions themselves live in lib/tabs.js, where they are pure and
+// tested. This file holds the mutable globals the rest of the UI reads, so each
+// action reads them into a state object, runs the transition, writes the result
+// back, and then does the DOM and disk work the effects ask for.
+
+/** Reset to a single blank tab — the state a launch, or a store change that
+ *  left nothing open, starts from. */
+function startBlankSession() {
+  const empty = { openTabs: [], currentId: null, closedStack: [] };
+  runTabEffects(applyTabs(tabModel.activateBlank(empty, tabDeps)));
+  editor.value = "";
+}
+
+/** Snapshot the globals in the shape lib/tabs.js expects. */
+function tabState() {
+  return { openTabs, currentId, closedStack };
+}
+
+/** What the transitions are allowed to reach: the draft store, and a way to
+ *  make a blank one. */
+const tabDeps = { drafts, makeBlank: createBlankDraft };
+
+/** Write a transition's result back into the globals; returns its effects. */
+function applyTabs({ state, effects }) {
+  openTabs = state.openTabs;
+  currentId = state.currentId;
+  // closedStack is a const binding shared elsewhere, so replace in place.
+  closedStack.length = 0;
+  closedStack.push(...state.closedStack);
+  return effects;
+}
+
+/** Run the effects a transition asked for, except "activate" — every caller
+ *  wants something different there (a full re-read, or just moving the
+ *  highlight), so it stays at the call site. */
+function runTabEffects(effects) {
+  for (const e of effects) {
+    if (e.type === "delete") invoke("delete_draft", { id: e.id }).catch(() => {});
+    if (e.type === "forget") itemEls.delete(e.id);
+  }
+}
 
 async function activate(id) {
   if (id === currentId) {
@@ -598,18 +641,15 @@ async function activate(id) {
 
 async function openInTab(id) {
   if (!drafts.has(id)) return;
-  if (!openTabs.includes(id)) {
-    openTabs.push(id);
-    renderTabs(); // a genuinely new tab appears (and animates in)
-  }
+  const wasOpen = openTabs.includes(id);
+  runTabEffects(applyTabs(tabModel.openInTab(tabState(), tabDeps, id)));
+  if (!wasOpen) renderTabs(); // a genuinely new tab appears (and animates in)
   await activate(id);
 }
 
 async function newTab() {
   await flush();
-  const d = createBlankDraft();
-  openTabs.push(d.id);
-  currentId = d.id;
+  runTabEffects(applyTabs(tabModel.newTab(tabState(), tabDeps)));
   editor.value = "";
   if (searchEl.value) {
     searchEl.value = "";
@@ -619,43 +659,28 @@ async function newTab() {
   focusEnd();
 }
 
-function pruneIfEmpty(id) {
-  const d = drafts.get(id);
-  if (d && isEmpty(d)) {
-    drafts.delete(id);
-    invoke("delete_draft", { id }).catch(() => {});
-  }
-}
-
 async function closeTab(id) {
-  const idx = openTabs.indexOf(id);
-  if (idx === -1) return;
-  const d = drafts.get(id);
-  // Closing the last tab just spawns a fresh blank; if it's already an empty
-  // blank there's nothing to close — leave it (avoids a pointless rebuild).
-  if (openTabs.length === 1 && d && isEmpty(d)) return;
+  const before = tabState();
+  const result = tabModel.closeTab(before, tabDeps, id);
+  if (result.state === before) return; // not open, or the only blank tab
 
-  const wasCurrent = id === currentId;
-  if (wasCurrent) await flush();
+  // The flush has to happen before the model's content is read back below.
+  if (result.effects.some((e) => e.type === "flush")) await flush();
 
-  openTabs.splice(idx, 1);
   previewTabs.delete(id);
-  // Remember meaningful drafts so ⇧⌘T can reopen them; blanks get pruned away.
-  if (d && isSaved(d)) closedStack.push(id);
-  pruneIfEmpty(id);
+  const activated = result.effects.find((e) => e.type === "activate")?.id;
+  // An id that wasn't open before is the blank the model spawned for an
+  // otherwise empty window.
+  const isNewBlank = activated && !before.openTabs.includes(activated);
+  runTabEffects(applyTabs(result));
 
-  if (openTabs.length === 0) {
-    const nd = createBlankDraft();
-    openTabs.push(nd.id);
-    currentId = nd.id;
+  if (isNewBlank) {
     editor.value = "";
     renderTabs(); // the fresh blank tab appears
   } else {
-    if (wasCurrent) {
-      const next = openTabs[Math.min(idx, openTabs.length - 1)];
-      currentId = next;
-      editor.value = drafts.get(next).content;
-    }
+    // Close doesn't re-read from disk the way activate() does: the tab was
+    // already open, so the model's copy is the newest one.
+    if (activated) editor.value = drafts.get(activated).content;
     // Drop only the closed tab's element so the others don't re-animate.
     tabsEl.querySelector(`.tab[data-id="${CSS.escape(id)}"]`)?.remove();
   }
@@ -667,43 +692,30 @@ async function closeTab(id) {
 }
 
 function cycleTab(dir) {
-  if (openTabs.length < 2) return;
-  const i = openTabs.indexOf(currentId);
-  const n = (i + dir + openTabs.length) % openTabs.length;
-  activate(openTabs[n]);
+  // Only the target matters here: activate() sets currentId itself and re-reads
+  // a file-backed draft, so the model's new state is not written back.
+  const { effects } = tabModel.cycleTab(tabState(), dir);
+  const next = effects.find((e) => e.type === "activate");
+  if (next) activate(next.id);
 }
 
 /** Reopen the most recently closed draft that still exists (⇧⌘T). */
 function reopenClosedTab() {
-  while (closedStack.length) {
-    const id = closedStack.pop();
-    if (drafts.has(id)) {
-      openInTab(id);
-      return;
-    }
-  }
+  const { state, effects } = tabModel.reopenClosedTab(tabState(), tabDeps);
+  // Only the stack is written back; openInTab does the tab and activation work.
+  closedStack.length = 0;
+  closedStack.push(...state.closedStack);
+  const opened = effects.find((e) => e.type === "activate");
+  if (opened) openInTab(opened.id);
 }
 
 /** Remove a draft from the in-memory model + UI (does not touch disk). */
 function removeDraftFromView(id) {
-  drafts.delete(id);
-  previewTabs.delete(id);
-  const ci = closedStack.indexOf(id);
-  if (ci !== -1) closedStack.splice(ci, 1);
   const wasOpen = openTabs.includes(id);
-  openTabs = openTabs.filter((t) => t !== id);
-
-  if (currentId === id) {
-    if (openTabs.length === 0) {
-      const nd = createBlankDraft();
-      openTabs.push(nd.id);
-      currentId = nd.id;
-      editor.value = "";
-    } else {
-      currentId = openTabs[openTabs.length - 1];
-      editor.value = drafts.get(currentId).content;
-    }
-  }
+  const wasCurrent = currentId === id;
+  previewTabs.delete(id);
+  runTabEffects(applyTabs(tabModel.removeDraftFromView(tabState(), tabDeps, id)));
+  if (wasCurrent) editor.value = drafts.get(currentId)?.content ?? "";
   renderAll();
   if (wasOpen) focusEnd();
 }
@@ -846,12 +858,7 @@ async function openFile() {
  *  with, or one left empty) from the open tabs and the store. No disk cleanup —
  *  an empty draft was never persisted. No-op if `id` is falsy or non-empty. */
 function dropScratch(id) {
-  const d = id && drafts.get(id);
-  if (!d || !isEmpty(d)) return;
-  const i = openTabs.indexOf(id);
-  if (i !== -1) openTabs.splice(i, 1);
-  drafts.delete(id);
-  itemEls.delete(id);
+  runTabEffects(applyTabs(tabModel.dropScratch(tabState(), tabDeps, id)));
 }
 
 /** Open a file with a known path — from the Open dialog, or from an OS request
@@ -871,8 +878,7 @@ async function openPathInTab(path) {
   const existing = [...drafts.values()].find((d) => d.file_path === path);
   if (existing) {
     if (existing.id !== scratchId) dropScratch(scratchId);
-    if (!openTabs.includes(existing.id)) openTabs.push(existing.id);
-    currentId = existing.id;
+    runTabEffects(applyTabs(tabModel.openInTab(tabState(), tabDeps, existing.id)));
     editor.value = existing.content;
     renderTabs();
     renderList();
@@ -910,8 +916,7 @@ async function openPathInTab(path) {
       pinned: false,
     };
     drafts.set(d.id, d);
-    openTabs.push(d.id);
-    currentId = d.id;
+    runTabEffects(applyTabs(tabModel.openInTab(tabState(), tabDeps, d.id)));
   }
   editor.value = content;
   renderTabs();
@@ -1519,10 +1524,7 @@ async function moveDraftsDir(dir) {
     closedStack.length = 0;
     openTabs = openTabs.filter((id) => drafts.has(id));
     if (!openTabs.length) {
-      const blank = createBlankDraft();
-      openTabs = [blank.id];
-      currentId = blank.id;
-      editor.value = "";
+      startBlankSession();
     } else if (!drafts.has(currentId)) {
       await activate(openTabs[0]);
     }
@@ -2828,10 +2830,7 @@ async function init() {
   for (const d of list) drafts.set(d.id, d);
 
   // Every launch starts on a fresh, clean page. Past notes live in the sidebar.
-  const blank = createBlankDraft();
-  openTabs = [blank.id];
-  currentId = blank.id;
-  editor.value = "";
+  startBlankSession();
 
   renderAll();
 
