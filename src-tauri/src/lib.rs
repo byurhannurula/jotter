@@ -237,6 +237,12 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
         let mut f = fs::File::create(&tmp)?;
         std::io::Write::write_all(&mut f, contents)?;
         f.sync_all()?; // the bytes must be on disk before the rename points at them
+                       // Rename replaces the inode, so a file the user made read-only for
+                       // others, or executable, would come back with default bits. Carry the
+                       // old mode over; a target that does not exist yet keeps the default.
+        if let Ok(meta) = fs::metadata(path) {
+            let _ = fs::set_permissions(&tmp, meta.permissions());
+        }
         Ok(())
     };
     if let Err(e) = write() {
@@ -1962,6 +1968,22 @@ mod tests {
             .filter(|n| n != "note.txt")
             .collect();
         assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_keeps_the_targets_permission_bits() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("private.txt");
+        fs::write(&target, "first").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+
+        write_atomic(&target, b"second").unwrap();
+
+        let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "rename must not reset the file's mode");
+        assert_eq!(fs::read_to_string(&target).unwrap(), "second");
     }
 
     #[test]
