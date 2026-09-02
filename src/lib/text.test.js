@@ -72,6 +72,30 @@ describe("isEmpty", () => {
   });
 });
 
+describe("isEmpty", () => {
+  const d = (over = {}) => ({ content: "", file_path: null, title: "", ...over });
+
+  it("is empty with no text, file, or name", () => {
+    expect(isEmpty(d())).toBe(true);
+    expect(isEmpty(d({ content: "   \n " }))).toBe(true);
+  });
+
+  it("is not empty once there is text", () => {
+    expect(isEmpty(d({ content: "hi" }))).toBe(false);
+  });
+
+  it("is not empty when a file backs it", () => {
+    expect(isEmpty(d({ file_path: "/tmp/a.txt" }))).toBe(false);
+  });
+
+  it("is not empty when the user has named it", () => {
+    // A renamed draft that was later cleared is still deliberate; pruning it
+    // on the next launch would lose it.
+    expect(isEmpty(d({ title: "Shopping" }))).toBe(false);
+    expect(isEmpty(d({ title: "   " }))).toBe(true);
+  });
+});
+
 describe("relTime", () => {
   const now = 1_000_000_000_000;
   it("says 'now' under a minute", () => expect(relTime(now - 30_000, now)).toBe("now"));

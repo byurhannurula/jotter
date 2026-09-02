@@ -57,9 +57,14 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// An "orphan" draft has no text and no on-disk file — safe to prune on load.
+/// An "orphan" draft has nothing in it worth keeping — no text, no on-disk
+/// file, and no name the user gave it — so it is safe to prune on load.
+///
+/// The title matters: a draft that was renamed and then cleared out is still
+/// something the user made deliberately, and pruning it on the next launch
+/// would lose it. Keep in step with `isEmpty` in lib/text.js.
 fn is_orphan(d: &Draft) -> bool {
-    d.content.trim().is_empty() && d.file_path.is_none()
+    d.content.trim().is_empty() && d.file_path.is_none() && d.title.trim().is_empty()
 }
 
 /// A draft backed by a file whose file has since disappeared (deleted or moved).
@@ -1606,6 +1611,26 @@ mod tests {
         assert!(needs_push(10, Some(5))); // edited since last sync -> push
         assert!(!needs_push(10, Some(10))); // already in sync -> skip
         assert!(!needs_push(5, Some(10))); // remote ahead -> skip (pull handles it)
+    }
+
+    #[test]
+    fn a_named_draft_is_not_an_orphan_even_when_empty() {
+        let mut d = Draft::default();
+        assert!(is_orphan(&d)); // nothing at all
+
+        d.title = "Shopping".into();
+        assert!(!is_orphan(&d)); // renamed, then cleared — still deliberate
+
+        d.title = "   ".into();
+        assert!(is_orphan(&d)); // whitespace is not a name
+
+        d.title = String::new();
+        d.content = "hi".into();
+        assert!(!is_orphan(&d));
+
+        d.content = String::new();
+        d.file_path = Some("/tmp/a.txt".into());
+        assert!(!is_orphan(&d));
     }
 
     #[test]

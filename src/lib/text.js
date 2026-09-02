@@ -39,9 +39,14 @@ export function draftPreview(d) {
   return lines.filter(Boolean).slice(1).join(" ").slice(0, 80);
 }
 
-/** A draft is "empty" (never persisted) when it has no text and no file. */
+/** A draft is "empty" (never persisted) when there is nothing in it worth
+ *  keeping: no text, no backing file, and no name the user gave it.
+ *
+ *  The title matters — a draft that was renamed and then cleared out is still
+ *  something the user made on purpose, and pruning it on the next launch would
+ *  lose it. Keep in step with `is_orphan` in lib.rs. */
 export function isEmpty(d) {
-  return d.content.trim() === "" && !d.file_path;
+  return d.content.trim() === "" && !d.file_path && !(d.title || "").trim();
 }
 
 /** Compact relative time: "now", "5m", "3h", "2d", "1w". `now` is injectable for tests. */
