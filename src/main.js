@@ -1881,9 +1881,18 @@ function openDraftMenu(e, id) {
     { separator: true },
     { label: "Export…", accel: ACCEL.export, action: () => exportDraft(id) },
   ];
-  // Sharing entries — only when a worker is configured.
+  // Cloud entries — only when a worker is configured.
   if (cloudConfigured) {
     items.push({ separator: true });
+    // Files opened from disk are local-only by default; let the user opt a
+    // specific one into cloud sync. In-app drafts always sync, so no entry there.
+    if (hasFile) {
+      if (d.cloud) {
+        items.push({ label: "Syncing to Cloud", disabled: true });
+      } else {
+        items.push({ label: "Sync to Cloud", action: () => syncFileToCloud(id) });
+      }
+    }
     if (sharedById.has(id)) {
       items.push({
         label: "Copy Share Link",
@@ -1904,6 +1913,25 @@ function openDraftMenu(e, id) {
     },
   );
   showContextMenu(e.clientX, e.clientY, items);
+}
+
+// Opt a file-backed draft into cloud sync (one-way). The on-disk file stays the
+// source of truth — this just lets the note's content ride to the cloud on the
+// next sync, like an in-app draft. `cloud` is a Draft field, so the choice
+// persists and the sync engine's push guard (`syncs_to_cloud`) honors it.
+async function syncFileToCloud(id) {
+  const d = drafts.get(id);
+  if (!d || !d.file_path) return;
+  d.cloud = true;
+  try {
+    await invoke("save_draft", { draft: d });
+    scheduleSync();
+    showToast("Syncing this file to the cloud");
+  } catch (err) {
+    console.error("cloud opt-in failed:", err);
+    d.cloud = false; // roll back so the menu still offers it
+    showToast("Couldn't enable sync for this file");
+  }
 }
 
 // Create a public link for a draft (snapshotting the latest content) and copy it.

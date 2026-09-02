@@ -26,6 +26,13 @@ struct Draft {
     // `#[serde(default)]` keeps older stored/remote drafts loading as unpinned.
     #[serde(default)]
     pinned: bool,
+    // Opt-in cloud sync for a file-backed draft. Files opened from disk are
+    // device-local by default (the on-disk file is their source of truth, and
+    // `file_path` never leaves the machine), so their content isn't pushed unless
+    // the user explicitly turns this on. Ignored for in-app drafts, which always
+    // sync. `#[serde(default)]` keeps older/remote drafts loading as opt-out.
+    #[serde(default)]
+    cloud: bool,
 }
 
 fn now_ms() -> i64 {
@@ -155,6 +162,7 @@ fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
                     created_at: now,
                     updated_at: now,
                     pinned: false,
+                    cloud: false,
                 };
                 write_draft(&app, &draft)?;
                 drafts.push(draft);
@@ -436,6 +444,14 @@ fn needs_push(updated_at: i64, synced: Option<i64>) -> bool {
     updated_at > synced.unwrap_or(i64::MIN)
 }
 
+/// Whether a draft's content is allowed to leave this machine. In-app notes (no
+/// backing file) always sync — the cloud is their home. Files opened from disk are
+/// device-local unless the user explicitly opted them in (`cloud`), since the file
+/// itself is the source of truth. Pure, so it's unit-tested.
+fn syncs_to_cloud(d: &Draft) -> bool {
+    d.file_path.is_none() || d.cloud
+}
+
 /// Adopt a remote draft only when it's STRICTLY newer than the local copy — a tie
 /// (same `updated_at`) means we already have it, so don't re-fetch.
 fn remote_supersedes(remote_updated: i64, local_updated: i64) -> bool {
@@ -550,6 +566,9 @@ async fn sync_core(
     for (id, d) in local.iter() {
         if is_orphan(d) {
             continue; // empty, unnamed scratch — nothing worth syncing
+        }
+        if !syncs_to_cloud(d) {
+            continue; // file opened from disk, not opted in — stays local
         }
         if needs_push(d.updated_at, synced.get(id).copied()) {
             let mut up = d.clone();
@@ -1295,6 +1314,15 @@ mod tests {
     }
 
     #[test]
+    fn only_in_app_or_opted_in_files_sync() {
+        assert!(syncs_to_cloud(&draft("note", None))); // in-app note -> always syncs
+        assert!(!syncs_to_cloud(&draft("note", Some("/tmp/a.txt")))); // opened file -> local
+        let mut opted_in = draft("note", Some("/tmp/a.txt"));
+        opted_in.cloud = true;
+        assert!(syncs_to_cloud(&opted_in)); // explicit opt-in -> syncs
+    }
+
+    #[test]
     fn normalize_url_trims_space_and_trailing_slashes() {
         assert_eq!(normalize_url("  https://x.example///  "), "https://x.example");
         assert_eq!(normalize_url("https://x.example"), "https://x.example");
@@ -1375,6 +1403,36 @@ mod tests {
 
         assert!(!changed); // a push doesn't touch local disk
         assert_eq!(synced.get("draft-a"), Some(&100)); // recorded as synced
+        assert!(pushed.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_core_skips_local_only_file_draft() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("note.txt");
+        let mut d = mk_draft("draft-f", "local only", 100);
+        d.file_path = Some(file.to_string_lossy().into_owned()); // opened from disk, not opted in
+        write_draft_in(dir.path(), &d).unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        // No PUT mock: a push of this draft would 404 and never land in `synced`.
+
+        let (_, synced, pushed) = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &HashMap::new(),
+        )
+        .await
+        .unwrap();
+
+        assert!(!synced.contains_key("draft-f")); // never pushed -> not recorded
         assert!(pushed.is_empty());
     }
 
