@@ -80,13 +80,7 @@ describe("closeTab", () => {
     const r = closeTab(state(["a", "b", "c"], "a"), w, "c");
     expect(r.state.openTabs).toEqual(["a", "b"]);
     expect(r.state.currentId).toBe("a");
-    expect(types(r.effects)).not.toContain("flush");
     check(r.state, w);
-  });
-
-  it("flushes pending edits only when the closing tab is current", () => {
-    const w = world([draft("a"), draft("b")]);
-    expect(types(closeTab(state(["a", "b"], "a"), w, "a").effects)).toContain("flush");
   });
 
   it("spawns a blank when the last tab is closed", () => {

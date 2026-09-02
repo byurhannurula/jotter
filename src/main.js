@@ -723,12 +723,12 @@ async function newTab() {
 }
 
 async function closeTab(id) {
+  // Before the model decides anything: it judges "is this blank" on the
+  // draft's content, and the editor can be a frame ahead of that.
+  if (id === currentId && openTabs.includes(id)) await flush();
   const before = tabState();
   const result = tabModel.closeTab(before, tabDeps, id);
   if (result.state === before) return; // not open, or the only blank tab
-
-  // The flush has to happen before the model's content is read back below.
-  if (result.effects.some((e) => e.type === "flush")) await flush();
 
   previewTabs.delete(id);
   const activated = result.effects.find((e) => e.type === "activate")?.id;

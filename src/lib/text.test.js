@@ -61,23 +61,12 @@ describe("draftPreview", () => {
 });
 
 describe("isEmpty", () => {
-  it("is true for blank text and no file", () => {
-    expect(isEmpty({ content: "  \n ", file_path: null })).toBe(true);
-  });
-  it("is false when it has a file path", () => {
-    expect(isEmpty({ content: "", file_path: "/a.txt" })).toBe(false);
-  });
-  it("is false when it has text", () => {
-    expect(isEmpty({ content: "x", file_path: null })).toBe(false);
-  });
-});
-
-describe("isEmpty", () => {
   const d = (over = {}) => ({ content: "", file_path: null, title: "", ...over });
 
   it("is empty with no text, file, or name", () => {
     expect(isEmpty(d())).toBe(true);
     expect(isEmpty(d({ content: "   \n " }))).toBe(true);
+    expect(isEmpty({ content: "", file_path: null })).toBe(true); // no title key at all
   });
 
   it("is not empty once there is text", () => {

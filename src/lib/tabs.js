@@ -5,7 +5,7 @@
 //
 // Each transition takes the current state and returns a new one, plus the
 // side effects the caller should carry out (`{ type: "delete", id }` to remove a
-// draft from the store, `{ type: "flush" }` to write pending edits first). The
+// draft from the store, `{ type: "activate", id }` to load a draft). The
 // `drafts` Map is the in-memory model rather than IO, so transitions do write to
 // it — adding a blank, dropping a pruned one — while leaving disk and DOM alone.
 
@@ -55,6 +55,8 @@ export function newTab(state, deps) {
 /**
  * Close a tab. The draft itself survives unless it was an untouched blank, in
  * which case it is pruned from the store — there is nothing in it to keep.
+ * Callers flush pending edits before asking, since "is it blank" is decided on
+ * the model's content and the editor may be ahead of it.
  * Closing the only tab leaves a fresh blank behind rather than no editor, and
  * closing an already-blank only tab does nothing at all.
  */
@@ -67,7 +69,7 @@ export function closeTab(state, deps, id) {
 
   const wasCurrent = id === state.currentId;
   const next = clone(state);
-  const effects = wasCurrent ? [{ type: "flush" }] : [];
+  const effects = [];
 
   next.openTabs.splice(idx, 1);
   if (d && isSaved(d)) next.closedStack.push(id);

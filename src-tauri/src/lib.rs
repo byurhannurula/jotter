@@ -257,13 +257,14 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 /// Writing the entry first would leave it describing the file as it was before,
 /// and every sync pull would then look like a conflict. Dying between the two
 /// leaves a stale mtime, which errs towards asking rather than overwriting.
-fn write_draft_in(dir: &Path, draft: &Draft) -> Result<(), String> {
+fn write_draft_in(dir: &Path, draft: &Draft) -> Result<Option<i64>, String> {
     let mut d = draft.clone();
     if let Some(fp) = &d.file_path {
         write_atomic(Path::new(fp), d.content.as_bytes())?;
         d.file_mtime = mtime_ms(fp);
     }
-    write_entry_in(dir, &d)
+    write_entry_in(dir, &d)?;
+    Ok(d.file_mtime)
 }
 
 /// Write only the store entry, leaving the backing text file alone. For fixes
@@ -292,7 +293,7 @@ fn read_draft(app: &AppHandle, id: &str) -> Option<Draft> {
         .and_then(|s| serde_json::from_str::<Draft>(&s).ok())
 }
 
-fn write_draft(app: &AppHandle, draft: &Draft) -> Result<(), String> {
+fn write_draft(app: &AppHandle, draft: &Draft) -> Result<Option<i64>, String> {
     write_draft_in(&drafts_dir(app)?, draft)
 }
 
@@ -387,21 +388,20 @@ const CONFLICT: &str = "conflict";
 ///
 /// Returns the file's mtime after the write, for the caller to hold on to.
 #[tauri::command]
-fn save_draft(app: AppHandle, mut draft: Draft) -> Result<Option<i64>, String> {
+fn save_draft(app: AppHandle, draft: Draft) -> Result<Option<i64>, String> {
     if let Some(path) = draft.file_path.as_deref() {
         if is_conflict(draft.file_mtime, mtime_ms(path)) {
             return Err(CONFLICT.to_string());
         }
     }
-    write_draft(&app, &draft)?;
+    let mtime = write_draft(&app, &draft)?;
     // A re-saved draft is no longer deleted — but only if it is one that syncs.
     // A file draft opted back out has a tombstone waiting to remove its remote
     // copy, and clearing that on every autosave would strand it in the cloud.
     if syncs_to_cloud(&draft) {
         clear_tombstone(&app, &draft.id);
     }
-    draft.file_mtime = draft.file_path.as_deref().and_then(mtime_ms);
-    Ok(draft.file_mtime)
+    Ok(mtime)
 }
 
 /// Ask the next sync to remove this draft's copy from the cloud while keeping it
@@ -886,10 +886,6 @@ async fn sync_core(
         // until our own DELETE goes out later in this pass. Pulling it back
         // first would resurrect it in the sidebar for one sync interval, and
         // the pass after that would delete it again.
-        // A draft this device has just deleted is still listed by the worker
-        // until our own DELETE goes out later in this pass. Pulling it back
-        // first would resurrect it in the sidebar for one sync interval, and
-        // the pass after that would delete it again.
         if tombstones.contains_key(&entry.id) {
             continue;
         }
@@ -926,8 +922,7 @@ async fn sync_core(
                 // write_draft_in records the file's new mtime in the stored
                 // entry, so pulling a newer copy does not look like an outside
                 // edit the next time this draft is saved.
-                write_draft_in(dir, &remote)?;
-                remote.file_mtime = remote.file_path.as_deref().and_then(mtime_ms);
+                remote.file_mtime = write_draft_in(dir, &remote)?;
                 synced.insert(entry.id.clone(), remote.updated_at);
                 local.insert(entry.id.clone(), remote);
                 changed = true;
