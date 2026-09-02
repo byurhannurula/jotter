@@ -19,6 +19,7 @@ import {
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
 import * as tabModel from "./lib/tabs.js";
+import { tabKeyAction } from "./lib/keys.js";
 import {
   TOKEN_MASK,
   isTypedToken as isTypedTokenValue,
@@ -779,36 +780,24 @@ function onInput() {
 /** One indent step per `tabkey` setting value. */
 const TAB_UNITS = { tab: "\t", 2: "  ", 4: "    " };
 
-/** Set by Escape, cleared by the next key. Escape-then-Tab is the standard way
- * out of an editor that captures Tab — without it the textarea is a keyboard trap. */
+/** Whether Escape has armed the tab-out. The rule lives in lib/keys.js. */
 let tabEscapes = false;
 
 function onEditorKeydown(e) {
-  if (e.key === "Escape") {
-    tabEscapes = true;
-    return;
-  }
-  // Modifier-only keydowns must not clear the flag: Shift arrives before the
-  // Tab it belongs to, so clearing here broke Esc-then-Shift-Tab entirely.
-  if (e.key === "Shift" || e.key === "Alt" || e.key === "Control" || e.key === "Meta") {
-    return;
-  }
-  if (e.key !== "Tab" || e.metaKey || e.ctrlKey || e.altKey) {
-    tabEscapes = false; // ⌃Tab (cycle tabs) is handled at the document level
-    return;
-  }
-  if (tabEscapes) {
-    tabEscapes = false;
-    return; // let the browser move focus
-  }
+  const { action, armed } = tabKeyAction(e, {
+    mode: getSetting("tabkey"),
+    armed: tabEscapes,
+  });
+  tabEscapes = armed;
+  // "release" hands the key to the browser so focus can leave the editor.
+  if (action !== "indent" && action !== "outdent") return;
 
-  if (getSetting("tabkey") === "off") return; // let the browser move focus
   const edit = indentEdit(
     editor.value,
     editor.selectionStart,
     editor.selectionEnd,
     TAB_UNITS[getSetting("tabsize")] || TAB_UNITS.tab,
-    e.shiftKey,
+    action === "outdent",
   );
   e.preventDefault();
   if (!edit) return;
