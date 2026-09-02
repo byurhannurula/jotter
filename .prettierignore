@@ -6,3 +6,8 @@ src-tauri/gen
 pnpm-lock.yaml
 LICENSE
 .claude/settings.local.json
+# Third-party agent skills installed locally; not ours to format.
+.agents
+skills-lock.json
+.claude/skills/*
+!.claude/skills/release
