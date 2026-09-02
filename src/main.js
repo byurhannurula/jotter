@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { homeDir } from "@tauri-apps/api/path";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import MarkdownIt from "markdown-it";
@@ -1352,6 +1353,153 @@ function rowLabel(text) {
   return el;
 }
 
+/* ---- Drafts folder ------------------------------------------------------
+   Moving the store is what lets someone put it in a Syncthing/Dropbox folder and
+   get sync without the Worker. The Rust side owns the move; this just drives it. */
+
+let draftsDirPath = "";
+let homePath = "";
+
+/** `/Users/me/Notes` -> `~/Notes`, the way a Mac shows a path to a person.
+ *  Left alone on Windows, where `~` is not the convention. */
+function tildePath(p) {
+  if (p.includes("\\") || !homePath || !p.startsWith(homePath)) return p;
+  const rest = p.slice(homePath.length).replace(/^\//, "");
+  return rest ? `~/${rest}` : "~";
+}
+
+/** Abbreviate a long path from the middle, keeping the root and the last few
+ *  folders — the two ends that say where you are. Done here rather than with
+ *  CSS: left-truncating via `direction: rtl` reorders a leading `~` or `/` to
+ *  the far end, which reads as a different path entirely. */
+function shortPath(p, max = 44) {
+  const full = tildePath(p);
+  if (full.length <= max) return full;
+
+  const sep = full.includes("\\") ? "\\" : "/";
+  const parts = full.split(/[/\\]/);
+  // A posix absolute path splits to a leading "", which is what puts the root
+  // separator back when the pieces are rejoined; on Windows the head is "C:".
+  // A UNC path (\\server\share) splits to two leading empties and needs both.
+  const head = parts[0] === "" && full.startsWith(sep + sep) ? sep : parts[0];
+  let tail = [];
+  for (let i = parts.length - 1; i > 0; i -= 1) {
+    const next = [parts[i], ...tail];
+    if (tail.length && `${head}${sep}…${sep}${next.join(sep)}`.length > max) break;
+    tail = next;
+  }
+  // If nothing was actually dropped, the ellipsis would be a lie (and longer).
+  if (tail.length >= parts.length - 1) return full;
+  return `${head}${sep}…${sep}${tail.join(sep)}`;
+}
+
+async function refreshDraftsDir() {
+  const label = document.getElementById("drafts-dir-path");
+  const reset = document.getElementById("drafts-dir-reset");
+  if (!label) return;
+  try {
+    if (!homePath) homePath = (await homeDir()).replace(/[/\\]+$/, "");
+  } catch {
+    homePath = "";
+  }
+  try {
+    const [dir, isDefault] = await invoke("get_drafts_dir");
+    draftsDirPath = dir;
+    label.textContent = shortPath(dir);
+    label.title = dir;
+    if (reset) reset.disabled = isDefault;
+  } catch {
+    label.textContent = "Unavailable";
+  }
+}
+
+/** Point the store at `dir`, or back at the default when `dir` is null. */
+async function moveDraftsDir(dir) {
+  try {
+    await invoke("set_drafts_dir", { dir });
+    await refreshDraftsDir();
+    // Everything on screen came from the old folder, so reload the store.
+    const list = await invoke("init_store");
+    drafts.clear();
+    for (const d of list) drafts.set(d.id, d);
+    for (const id of openTabs) {
+      if (!drafts.has(id)) closedStack.length = 0;
+    }
+    openTabs = openTabs.filter((id) => drafts.has(id));
+    if (!openTabs.length) {
+      const blank = createBlankDraft();
+      openTabs = [blank.id];
+      currentId = blank.id;
+      editor.value = "";
+    } else if (!drafts.has(currentId)) {
+      await activate(openTabs[0]);
+    }
+    renderAll();
+    showToast("Drafts folder changed");
+  } catch (e) {
+    showToast(`Could not move the drafts folder: ${e}`);
+  }
+}
+
+async function chooseDraftsDir() {
+  const picked = await openDialog({ directory: true, multiple: false });
+  if (typeof picked === "string") await moveDraftsDir(picked);
+}
+
+function renderStorageSection() {
+  const host = sectionEl("general");
+  host.append(groupTitle("Drafts folder"));
+
+  const card = groupCard();
+
+  // The path and its primary action share a row; the two secondary actions sit
+  // together below, rather than spread across the card by the row's own
+  // space-between.
+  const row = groupRow();
+  const path = document.createElement("span");
+  path.id = "drafts-dir-path";
+  path.className = "path-value";
+
+  const choose = document.createElement("button");
+  choose.className = "prompt-btn sync-btn";
+  choose.textContent = "Choose…";
+  choose.addEventListener("click", chooseDraftsDir);
+
+  row.append(rowLabel("Location"), path, choose);
+  card.append(row);
+
+  const actions = groupRow();
+  const group = document.createElement("div");
+  group.className = "btn-group";
+
+  const show = document.createElement("button");
+  show.className = "prompt-btn sync-btn";
+  show.textContent = "Show in Finder";
+  show.addEventListener("click", () => {
+    if (draftsDirPath) revealDraft(draftsDirPath);
+  });
+
+  const reset = document.createElement("button");
+  reset.id = "drafts-dir-reset";
+  reset.className = "prompt-btn sync-btn";
+  reset.textContent = "Use default";
+  reset.disabled = true;
+  reset.addEventListener("click", () => moveDraftsDir(null));
+
+  group.append(show, reset);
+  actions.append(group);
+  card.append(actions);
+
+  const note = document.createElement("div");
+  note.className = "settings-note";
+  note.textContent =
+    "Drafts move with it. Point it at a synced folder — Syncthing, iCloud Drive, Dropbox — to keep two Macs in step without the cloud Worker.";
+  card.append(note);
+
+  host.append(card);
+  refreshDraftsDir();
+}
+
 function renderShortcutsSection() {
   const host = sectionEl("shortcuts");
   host.replaceChildren();
@@ -1861,6 +2009,7 @@ function initSettings() {
     cards[sec].append(settingRow(name));
     markControl(name, getSetting(name));
   }
+  renderStorageSection();
   renderShortcutsSection();
   renderSyncSection();
   renderAboutSection();

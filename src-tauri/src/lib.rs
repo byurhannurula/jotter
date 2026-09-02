@@ -62,10 +62,95 @@ fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Where the drafts store lives when the user has not moved it.
+fn default_drafts_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("drafts"))
+}
+
+fn store_config_file(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_dir(app)?.join("store.json"))
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct StoreConfig {
+    /// Absolute path to the drafts folder. `None` means the default location.
+    dir: Option<String>,
+}
+
+fn read_store_config(app: &AppHandle) -> StoreConfig {
+    store_config_file(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// The drafts store. Honours a user-chosen folder — which is what makes it
+/// possible to point the store at a Syncthing/Dropbox directory — and falls back
+/// to the default if that folder has gone away (an unmounted volume, say), so a
+/// missing external disk degrades to an empty store instead of an error on boot.
 fn drafts_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app_dir(app)?.join("drafts");
+    if let Some(custom) = read_store_config(app).dir {
+        let dir = PathBuf::from(custom);
+        if fs::create_dir_all(&dir).is_ok() {
+            return Ok(dir);
+        }
+    }
+    let dir = default_drafts_dir(app)?;
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
+}
+
+/// The drafts folder, and whether it is the default one.
+#[tauri::command]
+fn get_drafts_dir(app: AppHandle) -> Result<(String, bool), String> {
+    let current = drafts_dir(&app)?;
+    let is_default = current == default_drafts_dir(&app)?;
+    Ok((current.to_string_lossy().into_owned(), is_default))
+}
+
+/// Move the drafts store to `dir` (or back to the default when `dir` is None).
+/// Existing `*.json` drafts are copied over first; a name that already exists at
+/// the destination is left alone, so pointing two Macs at one synced folder
+/// merges rather than overwrites.
+#[tauri::command]
+fn set_drafts_dir(app: AppHandle, dir: Option<String>) -> Result<String, String> {
+    let from = drafts_dir(&app)?;
+    let to = match &dir {
+        Some(d) => PathBuf::from(d),
+        None => default_drafts_dir(&app)?,
+    };
+    fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+
+    if from != to {
+        for entry in fs::read_dir(&from).map_err(|e| e.to_string())?.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(name) = path.file_name() else { continue };
+            let target = to.join(name);
+            if target.exists() {
+                continue;
+            }
+            // Copy-then-remove rather than rename: the destination is often on a
+            // different volume, where rename fails with a cross-device error.
+            if fs::copy(&path, &target).is_ok() {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+
+    let cfg = StoreConfig {
+        dir: if to == default_drafts_dir(&app)? {
+            None
+        } else {
+            Some(to.to_string_lossy().into_owned())
+        },
+    };
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    fs::write(store_config_file(&app)?, json).map_err(|e| e.to_string())?;
+    Ok(to.to_string_lossy().into_owned())
 }
 
 // Directory-based store primitives — take a plain `dir` so the sync engine can be
@@ -1235,6 +1320,8 @@ pub fn run() {
             sync_now,
             list_drafts,
             synced_ids,
+            get_drafts_dir,
+            set_drafts_dir,
             create_share,
             revoke_share,
             refresh_shares,

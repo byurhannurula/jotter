@@ -1310,6 +1310,36 @@ body.sidebar-hidden.fullscreen .tabbar {
   opacity: 0.4;
   cursor: default;
 }
+/* A filesystem path, already abbreviated from the middle by shortPath(). The
+   ellipsis here is only a backstop for a very narrow window; the full path is
+   on the title attribute. */
+.path-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Related actions stay together instead of being spread by the row. */
+.btn-group {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-note {
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--settings-border);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* A note explaining the control above it belongs to that row, so no rule
+   between them. */
 /* A circled "i" beside a setting's label; the text itself lives in .tip. */
 .info-btn {
   flex: 0 0 auto;
