@@ -24,6 +24,8 @@
   --settings-rail: #e9e9ec;
   --settings-border: rgba(0, 0, 0, 0.1);
   --sidebar-w: 250px;
+  --sidebar-min: 190px;
+  --sidebar-max: 420px;
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 
   /* Title-bar geometry. The traffic lights are moved down to match from Rust
@@ -129,6 +131,7 @@ body.ready .app {
 /* ---- Drafts sidebar ---- */
 
 .sidebar {
+  position: relative;
   flex: 0 0 auto;
   width: var(--sidebar-w);
   overflow: hidden;
@@ -142,6 +145,40 @@ body.ready .app {
 body.sidebar-hidden .sidebar {
   width: 0;
   border-right-color: transparent;
+}
+
+/* Drag handle on the sidebar's edge. Wider than it looks so it is easy to grab;
+   the visible hairline is the sidebar's own border. */
+.sidebar-resize {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.sidebar-resize:hover,
+.sidebar-resize:focus-visible,
+body.resizing .sidebar-resize {
+  background: linear-gradient(to right, transparent 0, transparent 4px, var(--accent) 4px);
+}
+
+body.sidebar-hidden .sidebar-resize {
+  display: none;
+}
+
+/* The width follows the pointer during a drag, so the easing has to stand down. */
+body.resizing .sidebar {
+  transition: none;
+}
+
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .sidebar-inner {
@@ -381,7 +418,10 @@ body.sidebar-hidden .sidebar {
   padding: 0 8px;
   user-select: none;
   -webkit-user-select: none;
-  transition: padding-left 0.24s var(--ease);
+  transition:
+    padding-left 0.24s var(--ease),
+    margin-top 0.24s var(--ease),
+    opacity 0.12s var(--ease);
 }
 
 /* Clear the floating traffic lights when the sidebar is collapsed. */
@@ -481,6 +521,21 @@ body.sidebar-hidden .tabbar {
   flex: 0 0 auto;
 }
 
+.tab-side {
+  flex: 0 0 auto;
+  margin-right: 2px;
+}
+
+/* Half-filled panel glyph so "open" reads as a state, not just a hover. */
+.tab-side.active svg rect {
+  fill: currentColor;
+  fill-opacity: 0.14;
+}
+
+body.no-sidebar-btn #sidebar-toggle {
+  display: none;
+}
+
 .editor {
   flex: 1 1 auto;
   width: 100%;
@@ -498,6 +553,7 @@ body.sidebar-hidden .tabbar {
   padding: 8px 24px 48px;
   caret-color: var(--caret);
   tab-size: 4;
+  transition: padding-top 0.24s var(--ease);
 }
 
 .editor[hidden] {
@@ -678,7 +734,7 @@ body.margins-wide .md-view {
 
 .statusbar {
   flex: 0 0 auto;
-  height: 24px;
+  height: var(--statusbar-h);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -689,6 +745,9 @@ body.margins-wide .md-view {
   font-variant-numeric: tabular-nums;
   user-select: none;
   -webkit-user-select: none;
+  transition:
+    margin-bottom 0.24s var(--ease),
+    opacity 0.12s var(--ease);
 }
 
 .status-seg {
@@ -701,6 +760,53 @@ body.no-statusbar .statusbar {
 
 body.no-preview-btn #preview-toggle {
   display: none;
+}
+
+/* ---- Focus mode ---- */
+
+body.focus-mode .sidebar {
+  width: 0;
+  border-right-color: transparent;
+}
+
+/* The bars leave by collapsing their own space — a negative margin equal to the
+   bar's height pulls it off the edge and gives the editor the room at the same
+   rate, so nothing jumps. Tabs go up, the status bar goes down. */
+body.focus-mode .tabbar {
+  margin-top: calc(var(--titlebar-h) * -1);
+  opacity: 0;
+  pointer-events: none;
+}
+
+body.focus-mode .statusbar {
+  margin-bottom: calc(var(--statusbar-h) * -1);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The tab bar's space is gone, but the traffic lights are still sitting in it —
+   so the text keeps clear of them. Real fullscreen is the one case with no
+   lights to avoid, and only there does the text move up. */
+body.focus-mode .editor,
+body.focus-mode .md-view {
+  padding-top: var(--titlebar-h);
+}
+
+body.focus-mode.fullscreen .editor,
+body.focus-mode.fullscreen .md-view {
+  padding-top: 20px;
+}
+
+/* Brushing the top edge slides the tab bar back without leaving the mode. */
+body.focus-mode.chrome-peek .tabbar {
+  margin-top: 0;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Only real fullscreen takes the traffic lights away. */
+body.sidebar-hidden.fullscreen .tabbar {
+  padding-left: 8px;
 }
 
 /* ---- Find & Replace bar ---- */

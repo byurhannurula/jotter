@@ -1022,12 +1022,24 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let toggle_preview = MenuItemBuilder::with_id("toggle_preview", "Toggle Markdown Preview")
         .accelerator("Shift+CmdOrCtrl+P")
         .build(app)?;
+    // Focus Mode owns the fullscreen key, and goes fullscreen itself — so the
+    // Window menu below deliberately drops the stock "Enter Full Screen" item
+    // rather than let two items claim the same accelerator.
+    let focus_mode = MenuItemBuilder::with_id("focus_mode", "Focus Mode")
+        .accelerator(if cfg!(target_os = "macos") {
+            "Control+Command+F"
+        } else {
+            "F11"
+        })
+        .build(app)?;
     let settings = MenuItemBuilder::with_id("settings", "Settings…")
         .accelerator("CmdOrCtrl+,")
         .build(app)?;
     let view_menu = SubmenuBuilder::new(app, "View")
         .item(&toggle_sidebar)
         .item(&toggle_preview)
+        .separator()
+        .item(&focus_mode)
         .separator()
         .item(&settings)
         .build()?;
@@ -1040,7 +1052,6 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let next_tab = MenuItemBuilder::with_id("next_tab", "Show Next Tab").build(app)?;
     let window_menu = SubmenuBuilder::new(app, "Window")
         .minimize()
-        .fullscreen()
         .separator()
         .item(&prev_tab)
         .item(&next_tab)
@@ -1202,6 +1213,7 @@ pub fn run() {
                     | "find_prev"
                     | "toggle_sidebar"
                     | "toggle_preview"
+                    | "focus_mode"
                     | "settings"
                     | "about"
             ) {

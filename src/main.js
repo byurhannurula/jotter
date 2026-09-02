@@ -881,6 +881,120 @@ async function save() {
 
 function toggleSidebar() {
   document.body.classList.toggle("sidebar-hidden");
+  syncSidebarBtn();
+}
+
+const SIDEBAR_MIN = 190;
+const SIDEBAR_MAX = 420;
+
+function setSidebarWidth(px) {
+  const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)));
+  document.documentElement.style.setProperty("--sidebar-w", `${w}px`);
+  localStorage.setItem("sidebar-w", String(w));
+  return w;
+}
+
+/** Drag (or arrow-key) the sidebar's trailing edge to resize it. */
+function initSidebarResize() {
+  const handle = document.getElementById("sidebar-resize");
+  if (!handle) return;
+
+  const stored = Number(localStorage.getItem("sidebar-w"));
+  if (stored) setSidebarWidth(stored);
+
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    // Pointer capture keeps the drag alive when the cursor outruns the handle.
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add("resizing");
+
+    const onMove = (ev) => setSidebarWidth(ev.clientX);
+    const onUp = () => {
+      handle.releasePointerCapture(e.pointerId);
+      document.body.classList.remove("resizing");
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  });
+
+  // A separator has to be operable from the keyboard, not just the mouse.
+  handle.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 24 : 8;
+    if (e.key === "ArrowLeft") setSidebarWidth(sidebarWidth() - step);
+    else if (e.key === "ArrowRight") setSidebarWidth(sidebarWidth() + step);
+    else return;
+    e.preventDefault();
+  });
+
+  handle.addEventListener("dblclick", () => setSidebarWidth(250));
+}
+
+function sidebarWidth() {
+  return parseInt(getComputedStyle(document.documentElement).getPropertyValue("--sidebar-w"), 10);
+}
+
+/** Mirror the sidebar's state onto its tab-bar button. */
+function syncSidebarBtn() {
+  const btn = document.getElementById("sidebar-toggle");
+  if (!btn) return;
+  const open = !document.body.classList.contains("sidebar-hidden");
+  btn.classList.toggle("active", open);
+  btn.setAttribute("aria-pressed", String(open));
+}
+
+/** Focus mode: sidebar, tabs and status bar step aside, leaving only the text.
+ * The sidebar's own state is remembered so leaving the mode puts it back.
+ *
+ * Going fullscreen as well is opt-in (Settings -> Fullscreen in focus mode) and
+ * off by default: macOS hides the traffic lights and its own menu bar in
+ * fullscreen, so combining the two makes it impossible to see what focus mode
+ * itself did. */
+let focusMode = false;
+let focusRestoresSidebar = false;
+// Whether this focus session actually went fullscreen — so turning the setting
+// off mid-session still leaves the window the way it was found.
+let wasFullscreenFocus = false;
+
+let lastFocusToggle = 0;
+
+/** Toggle focus mode, ignoring a second call from the same keypress.
+ *  ⌃⌘F arrives either from the View menu or from the keydown handler below —
+ *  whichever macOS lets through — and occasionally from both. */
+function requestFocusToggle() {
+  const now = Date.now();
+  if (now - lastFocusToggle < 400) return;
+  lastFocusToggle = now;
+  toggleFocusMode();
+}
+
+async function toggleFocusMode(on = !focusMode) {
+  if (on === focusMode) return;
+  focusMode = on;
+  if (on) {
+    focusRestoresSidebar = !document.body.classList.contains("sidebar-hidden");
+    document.body.classList.add("sidebar-hidden", "focus-mode");
+  } else {
+    document.body.classList.remove("focus-mode", "chrome-peek");
+    if (focusRestoresSidebar) document.body.classList.remove("sidebar-hidden");
+  }
+  syncSidebarBtn();
+  // The in-window part of the mode is already applied, so a refused or
+  // unavailable fullscreen still leaves a usable window.
+  if (getSetting("focusFull") === "on" || (!on && wasFullscreenFocus)) {
+    wasFullscreenFocus = on;
+    try {
+      await appWindow.setFullscreen(on);
+      // Fullscreen is the only state with no traffic lights to leave room for.
+      document.body.classList.toggle("fullscreen", on);
+    } catch {
+      /* not fatal — the chrome is hidden either way */
+    }
+  }
+  if (!previewTabs.has(currentId)) editor.focus();
 }
 
 // --- settings + about + toast --------------------------------------------
@@ -915,8 +1029,13 @@ function applyStatusbar(v) {
 function applyPreviewBtn(v) {
   document.body.classList.toggle("no-preview-btn", v === "off");
 }
+function applySidebarBtn(v) {
+  document.body.classList.toggle("no-sidebar-btn", v === "off");
+}
 // Delete behavior is read at delete time; nothing to apply on change.
 function applyDelete() {}
+// Read when focus mode is entered; nothing to apply on change.
+function applyFocusFull() {}
 // Tab behavior is read at keypress time. The class only greys out the indent
 // size when Tab is not indenting.
 function applyTabKey() {
@@ -946,6 +1065,20 @@ const SETTINGS = {
       ["undo", "Undo toast"],
       ["confirm", "Confirm"],
     ],
+  },
+  sidebarBtn: {
+    section: "general",
+    label: "Sidebar button",
+    def: "on",
+    apply: applySidebarBtn,
+    control: "toggle",
+  },
+  focusFull: {
+    section: "general",
+    label: "Fullscreen in focus mode",
+    def: "off",
+    apply: applyFocusFull,
+    control: "toggle",
   },
   previewBtn: {
     section: "general",
@@ -1056,6 +1189,7 @@ const SHORTCUTS = [
     [
       ["⌘B", "Toggle sidebar"],
       ["⇧⌘P", "Toggle markdown preview"],
+      ["⌃⌘F / ⇧⌘F", "Focus mode"],
       ["⌘,", "Settings"],
     ],
   ],
@@ -2429,6 +2563,7 @@ async function init() {
 
   applyAllSettings();
   initSettings();
+  initSidebarResize();
   initFind();
   initSwitcher();
   bindBackdrop("settings");
@@ -2451,6 +2586,7 @@ async function init() {
   }
   document.getElementById("new-draft").addEventListener("click", newTab);
   document.getElementById("new-tab").addEventListener("click", newTab);
+  document.getElementById("sidebar-toggle").addEventListener("click", toggleSidebar);
   document.getElementById("preview-toggle").addEventListener("click", togglePreview);
   searchEl.addEventListener("input", () => {
     searchQuery = searchEl.value.trim().toLowerCase();
@@ -2464,6 +2600,19 @@ async function init() {
       e.preventDefault();
       cycleTab(e.shiftKey ? -1 : 1);
     }
+  });
+
+  // ⌃⌘F is on the View menu too, but macOS has owned that chord for Enter Full
+  // Screen for years and can swallow it before the menu item sees it. Handling
+  // it here as well means the key works either way — and ⇧⌘F is a second,
+  // unreserved way in for when the system wins.
+  document.addEventListener("keydown", (e) => {
+    if (e.altKey || e.code !== "KeyF") return;
+    const ctrlCmd = e.ctrlKey && e.metaKey && !e.shiftKey;
+    const shiftCmd = e.metaKey && e.shiftKey && !e.ctrlKey;
+    if (!ctrlCmd && !shiftCmd) return;
+    e.preventDefault();
+    requestFocusToggle();
   });
 
   // Draft-action accelerators (mirrored as hints in the context menu). All act on
@@ -2507,8 +2656,31 @@ async function init() {
         searchQuery = "";
         renderList();
         editor.focus();
-      }
+      } else if (focusMode) toggleFocusMode(false);
     }
+  });
+
+  // In focus mode the tab bar is hidden; brushing the top edge peeks it back.
+  // The two thresholds are hysteresis — without the gap the bar would vanish
+  // the moment the pointer moved onto it.
+  document.addEventListener("mousemove", (e) => {
+    if (!focusMode) return;
+    if (e.clientY <= 4) document.body.classList.add("chrome-peek");
+    else if (e.clientY > 64) document.body.classList.remove("chrome-peek");
+  });
+
+  // Leaving fullscreen by any other route (green button, Mission Control) has to
+  // drop focus mode too, or the chrome stays hidden in a windowed app. Debounced:
+  // macOS emits resizes all through the fullscreen animation, and asking mid-flight
+  // gives the old answer.
+  let fsSettle;
+  await appWindow.onResized(() => {
+    clearTimeout(fsSettle);
+    fsSettle = setTimeout(async () => {
+      if (focusMode && wasFullscreenFocus && !(await appWindow.isFullscreen().catch(() => true))) {
+        toggleFocusMode(false);
+      }
+    }, 400);
   });
 
   await listen("menu", (event) => {
@@ -2554,6 +2726,9 @@ async function init() {
         break;
       case "toggle_preview":
         togglePreview();
+        break;
+      case "focus_mode":
+        requestFocusToggle();
         break;
       case "settings":
         openSettings("general");
