@@ -248,12 +248,21 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Write a draft's store entry, and its backing file when it has one.
+///
+/// The text file goes first so its new mtime can be recorded in the stored
+/// entry: that is what a later save compares against to notice an outside edit.
+/// Writing the entry first would leave it describing the file as it was before,
+/// and every sync pull would then look like a conflict. Dying between the two
+/// leaves a stale mtime, which errs towards asking rather than overwriting.
 fn write_draft_in(dir: &Path, draft: &Draft) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
-    write_atomic(&draft_path(dir, &draft.id), json.as_bytes())?;
-    if let Some(fp) = &draft.file_path {
-        write_atomic(Path::new(fp), draft.content.as_bytes())?;
+    let mut d = draft.clone();
+    if let Some(fp) = &d.file_path {
+        write_atomic(Path::new(fp), d.content.as_bytes())?;
+        d.file_mtime = mtime_ms(fp);
     }
+    let json = serde_json::to_string_pretty(&d).map_err(|e| e.to_string())?;
+    write_atomic(&draft_path(dir, &d.id), json.as_bytes())?;
     Ok(())
 }
 
@@ -769,7 +778,11 @@ async fn sync_core(
                 let mut remote: Draft = resp.json().await.map_err(|e| e.to_string())?;
                 // Never overwrite the device-local file path; keep the local one.
                 remote.file_path = local.get(&entry.id).and_then(|l| l.file_path.clone());
+                // write_draft_in records the file's new mtime in the stored
+                // entry, so pulling a newer copy does not look like an outside
+                // edit the next time this draft is saved.
                 write_draft_in(dir, &remote)?;
+                remote.file_mtime = remote.file_path.as_deref().and_then(mtime_ms);
                 synced.insert(entry.id.clone(), remote.updated_at);
                 local.insert(entry.id.clone(), remote);
                 changed = true;
@@ -1611,6 +1624,26 @@ mod tests {
         assert!(needs_push(10, Some(5))); // edited since last sync -> push
         assert!(!needs_push(10, Some(10))); // already in sync -> skip
         assert!(!needs_push(5, Some(10))); // remote ahead -> skip (pull handles it)
+    }
+
+    #[test]
+    fn writing_a_file_backed_draft_records_the_files_mtime() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("note.txt");
+        let path = file.to_string_lossy().into_owned();
+        let mut d = draft("hello", Some(&path));
+        d.id = "note".into();
+        d.file_mtime = Some(1); // deliberately wrong
+
+        write_draft_in(dir.path(), &d).unwrap();
+
+        let stored: Draft =
+            serde_json::from_str(&fs::read_to_string(draft_path(dir.path(), "note")).unwrap())
+                .unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), "hello");
+        // The entry describes the file as it now is, not as the caller thought.
+        assert_eq!(stored.file_mtime, mtime_ms(file.to_str().unwrap()));
+        assert!(!is_conflict(stored.file_mtime, mtime_ms(file.to_str().unwrap())));
     }
 
     #[test]
