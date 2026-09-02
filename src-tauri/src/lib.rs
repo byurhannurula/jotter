@@ -1393,8 +1393,45 @@ fn position_traffic_lights(_window: &tauri::WebviewWindow, _bar_height: f64) {}
 /// Height of the app's title-bar row. Keep in sync with `--titlebar-h` in styles.css.
 const TITLEBAR_H: f64 = 40.0;
 
+/// Menu ids the webview handles (the `listen("menu", …)` switch in main.js).
+/// The event handler forwards exactly these; a test checks main.js knows them.
+const MENU_IDS: &[&str] = &[
+    "about",
+    "new",
+    "open",
+    "switcher",
+    "save",
+    "save_as",
+    "close_tab",
+    "reopen_tab",
+    "find",
+    "find_next",
+    "find_prev",
+    "toggle_sidebar",
+    "toggle_preview",
+    "focus_mode",
+    "settings",
+    "prev_tab",
+    "next_tab",
+];
+
+/// A menu item that the webview handles. `id` must be in MENU_IDS.
+fn item(
+    app: &AppHandle,
+    id: &str,
+    label: &str,
+    accel: Option<&str>,
+) -> tauri::Result<tauri::menu::MenuItem<tauri::Wry>> {
+    debug_assert!(MENU_IDS.contains(&id), "menu id {id} is not in MENU_IDS");
+    let mut b = MenuItemBuilder::with_id(id, label);
+    if let Some(a) = accel {
+        b = b.accelerator(a);
+    }
+    b.build(app)
+}
+
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
-    let about = MenuItemBuilder::with_id("about", "About Jotter").build(app)?;
+    let about = item(app, "about", "About Jotter", None)?;
     let app_menu = SubmenuBuilder::new(app, "Jotter")
         .item(&about)
         .separator()
@@ -1407,30 +1444,19 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .quit()
         .build()?;
 
-    let new = MenuItemBuilder::with_id("new", "New Draft")
-        .accelerator("CmdOrCtrl+N")
-        .build(app)?;
-    let new_tab = MenuItemBuilder::with_id("new", "New Tab")
-        .accelerator("CmdOrCtrl+T")
-        .build(app)?;
-    let open = MenuItemBuilder::with_id("open", "Open…")
-        .accelerator("CmdOrCtrl+O")
-        .build(app)?;
-    let quick_open = MenuItemBuilder::with_id("switcher", "Quick Open…")
-        .accelerator("CmdOrCtrl+P")
-        .build(app)?;
-    let save = MenuItemBuilder::with_id("save", "Save…")
-        .accelerator("CmdOrCtrl+S")
-        .build(app)?;
-    let save_as = MenuItemBuilder::with_id("save_as", "Save As…")
-        .accelerator("Shift+CmdOrCtrl+S")
-        .build(app)?;
-    let close_tab = MenuItemBuilder::with_id("close_tab", "Close Tab")
-        .accelerator("CmdOrCtrl+W")
-        .build(app)?;
-    let reopen_tab = MenuItemBuilder::with_id("reopen_tab", "Reopen Closed Tab")
-        .accelerator("Shift+CmdOrCtrl+T")
-        .build(app)?;
+    let new = item(app, "new", "New Draft", Some("CmdOrCtrl+N"))?;
+    let new_tab = item(app, "new", "New Tab", Some("CmdOrCtrl+T"))?;
+    let open = item(app, "open", "Open…", Some("CmdOrCtrl+O"))?;
+    let quick_open = item(app, "switcher", "Quick Open…", Some("CmdOrCtrl+P"))?;
+    let save = item(app, "save", "Save…", Some("CmdOrCtrl+S"))?;
+    let save_as = item(app, "save_as", "Save As…", Some("Shift+CmdOrCtrl+S"))?;
+    let close_tab = item(app, "close_tab", "Close Tab", Some("CmdOrCtrl+W"))?;
+    let reopen_tab = item(
+        app,
+        "reopen_tab",
+        "Reopen Closed Tab",
+        Some("Shift+CmdOrCtrl+T"),
+    )?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&new)
@@ -1446,15 +1472,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .item(&reopen_tab)
         .build()?;
 
-    let find = MenuItemBuilder::with_id("find", "Find…")
-        .accelerator("CmdOrCtrl+F")
-        .build(app)?;
-    let find_next = MenuItemBuilder::with_id("find_next", "Find Next")
-        .accelerator("CmdOrCtrl+G")
-        .build(app)?;
-    let find_prev = MenuItemBuilder::with_id("find_prev", "Find Previous")
-        .accelerator("Shift+CmdOrCtrl+G")
-        .build(app)?;
+    let find = item(app, "find", "Find…", Some("CmdOrCtrl+F"))?;
+    let find_next = item(app, "find_next", "Find Next", Some("CmdOrCtrl+G"))?;
+    let find_prev = item(app, "find_prev", "Find Previous", Some("Shift+CmdOrCtrl+G"))?;
     let edit_menu = SubmenuBuilder::new(app, "Edit")
         .undo()
         .redo()
@@ -1469,25 +1489,32 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .item(&find_prev)
         .build()?;
 
-    let toggle_sidebar = MenuItemBuilder::with_id("toggle_sidebar", "Toggle Drafts Sidebar")
-        .accelerator("CmdOrCtrl+B")
-        .build(app)?;
-    let toggle_preview = MenuItemBuilder::with_id("toggle_preview", "Toggle Markdown Preview")
-        .accelerator("Shift+CmdOrCtrl+P")
-        .build(app)?;
+    let toggle_sidebar = item(
+        app,
+        "toggle_sidebar",
+        "Toggle Drafts Sidebar",
+        Some("CmdOrCtrl+B"),
+    )?;
+    let toggle_preview = item(
+        app,
+        "toggle_preview",
+        "Toggle Markdown Preview",
+        Some("Shift+CmdOrCtrl+P"),
+    )?;
     // Focus Mode owns the fullscreen key, and goes fullscreen itself — so the
     // Window menu below deliberately drops the stock "Enter Full Screen" item
     // rather than let two items claim the same accelerator.
-    let focus_mode = MenuItemBuilder::with_id("focus_mode", "Focus Mode")
-        .accelerator(if cfg!(target_os = "macos") {
+    let focus_mode = item(
+        app,
+        "focus_mode",
+        "Focus Mode",
+        Some(if cfg!(target_os = "macos") {
             "Control+Command+F"
         } else {
             "F11"
-        })
-        .build(app)?;
-    let settings = MenuItemBuilder::with_id("settings", "Settings…")
-        .accelerator("CmdOrCtrl+,")
-        .build(app)?;
+        }),
+    )?;
+    let settings = item(app, "settings", "Settings…", Some("CmdOrCtrl+,"))?;
     let view_menu = SubmenuBuilder::new(app, "View")
         .item(&toggle_sidebar)
         .item(&toggle_preview)
@@ -1501,8 +1528,8 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     // unreliable on macOS — AppKit swallows the key before the menu acts, so the
     // shortcut is handled in the webview (see the keydown handler in main.js).
     // Menu items stay for discoverability / click access.
-    let prev_tab = MenuItemBuilder::with_id("prev_tab", "Show Previous Tab").build(app)?;
-    let next_tab = MenuItemBuilder::with_id("next_tab", "Show Next Tab").build(app)?;
+    let prev_tab = item(app, "prev_tab", "Show Previous Tab", None)?;
+    let next_tab = item(app, "next_tab", "Show Next Tab", None)?;
     let window_menu = SubmenuBuilder::new(app, "Window")
         .minimize()
         .separator()
@@ -1642,26 +1669,7 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             let id = event.id().0.as_str();
-            if matches!(
-                id,
-                "new"
-                    | "open"
-                    | "save"
-                    | "save_as"
-                    | "close_tab"
-                    | "reopen_tab"
-                    | "switcher"
-                    | "next_tab"
-                    | "prev_tab"
-                    | "find"
-                    | "find_next"
-                    | "find_prev"
-                    | "toggle_sidebar"
-                    | "toggle_preview"
-                    | "focus_mode"
-                    | "settings"
-                    | "about"
-            ) {
+            if MENU_IDS.contains(&id) {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.emit("menu", id);
                 }
@@ -2023,6 +2031,26 @@ mod tests {
 
         assert!(!set_cloud_in(dir.path(), "n", false).unwrap().cloud);
         assert!(set_cloud_in(dir.path(), "missing", true).is_err());
+    }
+
+    #[test]
+    fn menu_ids_are_unique_and_main_js_handles_every_one() {
+        let mut seen = std::collections::HashSet::new();
+        for id in MENU_IDS {
+            assert!(seen.insert(id), "duplicate menu id {id}");
+        }
+        // The webview's switch is the other half of this contract; read it so
+        // a menu id added here without a JS case fails at test time, not when
+        // a user clicks a menu item that does nothing.
+        let main_js = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/main.js"))
+            .expect("src/main.js next to src-tauri");
+        for id in MENU_IDS {
+            let case = format!("case \"{id}\":");
+            assert!(
+                main_js.contains(&case),
+                "main.js has no `{case}` for menu id {id}"
+            );
+        }
     }
 
     #[test]
