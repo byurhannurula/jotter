@@ -1196,6 +1196,72 @@ body.no-preview-btn #preview-toggle {
   opacity: 0.4;
   cursor: default;
 }
+/* A circled "i" beside a setting's label; the text itself lives in .tip. */
+.info-btn {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--faint);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  font-style: italic;
+  line-height: 13px;
+  text-align: center;
+  cursor: default;
+  transition:
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.info-btn:hover,
+.info-btn:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tip {
+  position: fixed;
+  z-index: 200;
+  max-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--settings-border);
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+}
+
+.tip.show {
+  opacity: 1;
+}
+
+.label-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Indent size means nothing when Tab is moving focus instead. */
+body.tab-moves-focus .setting-row[data-setting="tabsize"] {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.setting-row + .settings-note {
+  padding-top: 0;
+  border-top: none;
+}
+
 .sync-help {
   font-size: 12px;
   color: var(--muted);

@@ -6,7 +6,15 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import MarkdownIt from "markdown-it";
-import { baseName, draftTitle, draftPreview, isEmpty, relTime, findMatches } from "./lib/text.js";
+import {
+  baseName,
+  draftTitle,
+  draftPreview,
+  isEmpty,
+  relTime,
+  findMatches,
+  indentEdit,
+} from "./lib/text.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
 import {
@@ -693,6 +701,49 @@ function onInput() {
   if (!uiRaf) uiRaf = requestAnimationFrame(flushUi);
 }
 
+// --- Tab indentation -----------------------------------------------------
+
+/** One indent step per `tabkey` setting value. */
+const TAB_UNITS = { tab: "\t", 2: "  ", 4: "    " };
+
+/** Set by Escape, cleared by the next key. Escape-then-Tab is the standard way
+ * out of an editor that captures Tab — without it the textarea is a keyboard trap. */
+let tabEscapes = false;
+
+function onEditorKeydown(e) {
+  if (e.key === "Escape") {
+    tabEscapes = true;
+    return;
+  }
+  if (e.key !== "Tab" || e.metaKey || e.ctrlKey || e.altKey) {
+    tabEscapes = false; // ⌃Tab (cycle tabs) is handled at the document level
+    return;
+  }
+  if (tabEscapes) {
+    tabEscapes = false;
+    return; // let the browser move focus
+  }
+
+  if (getSetting("tabkey") === "off") return; // let the browser move focus
+  const edit = indentEdit(
+    editor.value,
+    editor.selectionStart,
+    editor.selectionEnd,
+    TAB_UNITS[getSetting("tabsize")] || TAB_UNITS.tab,
+    e.shiftKey,
+  );
+  e.preventDefault();
+  if (!edit) return;
+
+  // execCommand is deprecated but is the only way to edit a textarea and keep
+  // the native undo stack: assigning .value or setRangeText wipes ⌘Z history.
+  editor.setSelectionRange(edit.from, edit.to);
+  if (edit.text === "") document.execCommand("delete");
+  else document.execCommand("insertText", false, edit.text);
+  editor.setSelectionRange(edit.selStart, edit.selEnd);
+  queueStatus();
+}
+
 function flushUi() {
   uiRaf = 0;
   const d = drafts.get(currentId);
@@ -866,6 +917,11 @@ function applyPreviewBtn(v) {
 }
 // Delete behavior is read at delete time; nothing to apply on change.
 function applyDelete() {}
+// Tab behavior is read at keypress time. The class only greys out the indent
+// size when Tab is not indenting.
+function applyTabKey() {
+  document.body.classList.toggle("tab-moves-focus", getSetting("tabkey") === "off");
+}
 
 // Each setting renders into its section. Control type is a segmented control
 // ("seg", the default) or an on/off "toggle" switch.
@@ -931,6 +987,29 @@ const SETTINGS = {
       ["off", "Off"],
     ],
   },
+  tabkey: {
+    section: "editor",
+    label: "Tab key",
+    def: "indent",
+    apply: applyTabKey,
+    options: [
+      ["indent", "Indent"],
+      ["off", "Move focus"],
+    ],
+    note: "Indent: Tab indents the lines you selected, shift-tab takes it back out. Move focus: Tab steps to the next control instead. Either way, pressing Esc and then Tab moves focus — so the editor is never a keyboard trap.",
+  },
+  tabsize: {
+    section: "editor",
+    label: "Indent with",
+    def: "tab",
+    apply: applyTabKey,
+    options: [
+      ["tab", "Tab"],
+      ["2", "2 spaces"],
+      ["4", "4 spaces"],
+    ],
+    note: "What one indent step inserts. A tab character keeps the file smaller and lets other editors pick their own width; spaces look the same everywhere.",
+  },
   margins: {
     section: "editor",
     label: "Margins",
@@ -968,6 +1047,8 @@ const SHORTCUTS = [
       ["⌘Z / ⇧⌘Z", "Undo / Redo"],
       ["⌘F", "Find"],
       ["⌘G / ⇧⌘G", "Find next / previous"],
+      ["⇥ / ⇧⇥", "Indent / outdent"],
+      ["⎋ then ⇥", "Move focus out of the editor"],
     ],
   ],
   [
@@ -1025,10 +1106,17 @@ function settingRow(name) {
   const cfg = SETTINGS[name];
   const row = document.createElement("div");
   row.className = "setting-row";
+  row.dataset.setting = name;
   const label = document.createElement("span");
   label.className = "setting-label";
   label.textContent = cfg.label;
-  row.append(label);
+  // The row is space-between, so the label and its info icon share one child
+  // slot and the control keeps the far edge.
+  const labelWrap = document.createElement("span");
+  labelWrap.className = "label-wrap";
+  labelWrap.append(label);
+  if (cfg.note) labelWrap.append(infoButton(cfg.note));
+  row.append(labelWrap);
 
   if (cfg.control === "toggle") {
     const sw = document.createElement("button");
@@ -1051,6 +1139,59 @@ function settingRow(name) {
     row.append(seg);
   }
   return row;
+}
+
+/* ---- Tooltips ----------------------------------------------------------
+   One shared bubble, positioned on demand and parented to <body>. The settings
+   card clips its own overflow, so a tooltip living inside a row would be cut
+   off; a fixed-position element escapes that. */
+
+let tipEl = null;
+
+function showTip(anchor, text) {
+  if (!tipEl) {
+    tipEl = document.createElement("div");
+    tipEl.className = "tip";
+    tipEl.setAttribute("role", "tooltip");
+    document.body.append(tipEl);
+  }
+  tipEl.textContent = text;
+  tipEl.classList.add("show");
+
+  const a = anchor.getBoundingClientRect();
+  const t = tipEl.getBoundingClientRect();
+  const margin = 8;
+  // Above the icon by default; below it when there isn't room up there.
+  const above = a.top - t.height - margin > margin;
+  const left = Math.min(
+    Math.max(margin, a.left + a.width / 2 - t.width / 2),
+    window.innerWidth - t.width - margin,
+  );
+  tipEl.style.left = `${Math.round(left)}px`;
+  tipEl.style.top = `${Math.round(above ? a.top - t.height - margin : a.bottom + margin)}px`;
+}
+
+function hideTip() {
+  if (tipEl) tipEl.classList.remove("show");
+}
+
+/** A small circled "i" that reveals `text` on hover or keyboard focus. */
+function infoButton(text) {
+  const btn = document.createElement("button");
+  btn.className = "info-btn";
+  btn.type = "button";
+  btn.textContent = "i";
+  btn.setAttribute("aria-label", text);
+  btn.addEventListener("mouseenter", () => showTip(btn, text));
+  btn.addEventListener("focus", () => showTip(btn, text));
+  btn.addEventListener("mouseleave", hideTip);
+  btn.addEventListener("blur", hideTip);
+  // Tapping it should not look like a dead control.
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    showTip(btn, text);
+  });
+  return btn;
 }
 
 // Grouped-card building blocks (macOS-settings style).
@@ -2304,6 +2445,7 @@ async function init() {
   renderAll();
 
   editor.addEventListener("input", onInput);
+  editor.addEventListener("keydown", onEditorKeydown);
   for (const ev of ["keyup", "click", "select"]) {
     editor.addEventListener(ev, queueStatus);
   }
