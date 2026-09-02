@@ -866,6 +866,9 @@ function dropScratch(id) {
  *  active empty scratch tab rather than stranding it. If the file is already open
  *  (or in the store from a past session) we focus that tab instead of duplicating. */
 async function openPathInTab(path) {
+  // The OS names the same file differently depending on how it was opened, so
+  // resolve before comparing against what is already open.
+  path = await invoke("canonical_path", { path }).catch(() => path);
   if (!path) return;
   await flush(); // persist any edits on the current tab before we switch away
 

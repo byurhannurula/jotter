@@ -422,6 +422,22 @@ fn clear_tombstone(app: &AppHandle, id: &str) {
     let _ = write_sync_config(app, &cfg);
 }
 
+/// Resolve a path to its canonical form: symlinks followed, `.`/`..` removed,
+/// and on macOS `/tmp` expanded to `/private/tmp`.
+///
+/// The frontend decides whether a file is already open by comparing paths as
+/// strings, and the OS hands the same file over by different names depending on
+/// how it was opened — a dialog, a drop, "Open With", the command line. Without
+/// this the same file opens in two tabs that then overwrite each other.
+/// Falls back to the input when the path cannot be resolved, so a file that has
+/// since gone still reaches the caller's own error handling.
+#[tauri::command]
+fn canonical_path(path: String) -> String {
+    fs::canonicalize(&path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(path)
+}
+
 /// A file's contents and its modification time, so the caller can tell later
 /// whether anything else has written to it.
 #[tauri::command]
@@ -1099,7 +1115,11 @@ struct OpenedFiles {
 /// Route OS-supplied paths to the webview: filter to real files, then either emit
 /// (webview ready) or buffer (cold launch, frontend not listening yet).
 fn deliver_opened_paths(app: &AppHandle, paths: Vec<String>) {
-    let files: Vec<String> = paths.into_iter().filter(|p| Path::new(p).is_file()).collect();
+    let files: Vec<String> = paths
+        .into_iter()
+        .filter(|p| Path::new(p).is_file())
+        .map(canonical_path)
+        .collect();
     if files.is_empty() {
         return;
     }
@@ -1470,6 +1490,7 @@ pub fn run() {
             save_draft,
             delete_draft,
             read_text_file,
+            canonical_path,
             write_text_file,
             set_sync_config,
             get_sync_config,

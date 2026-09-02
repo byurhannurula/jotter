@@ -46,7 +46,8 @@
         "name": "Plain Text",
         "description": "Plain text document",
         "role": "Editor",
-        "rank": "Alternate"
+        "rank": "Alternate",
+        "mimeType": "text/plain"
       },
       {
         "ext": ["md", "markdown"],
