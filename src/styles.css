@@ -480,16 +480,12 @@ body.sidebar-hidden .tabbar {
   color: var(--text);
 }
 
-/* Keyboard focus on the roving widgets: tabs, sidebar rows, menu items. Inset
-   so the ring stays inside the rounded shape. */
+/* Keyboard focus on the roving widgets: tabs, sidebar rows, menu items. No
+   ring; the focused item takes the same fill the pointer gives on hover. */
 .tab:focus-visible,
 .draft-item:focus-visible,
 .context-item:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-
-.context-item:focus-visible {
+  outline: none;
   background: var(--item-active);
 }
 
