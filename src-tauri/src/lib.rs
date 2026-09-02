@@ -163,7 +163,9 @@ fn set_drafts_dir(app: AppHandle, dir: Option<String>) -> Result<String, String>
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            let Some(name) = path.file_name() else { continue };
+            let Some(name) = path.file_name() else {
+                continue;
+            };
             let target = to.join(name);
             if target.exists() {
                 continue;
@@ -427,9 +429,10 @@ fn clear_tombstone(app: &AppHandle, id: &str) {
 fn conflict_copy_path(path: &Path) -> PathBuf {
     let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
     match (stem, path.extension()) {
-        (Some(stem), Some(ext)) => {
-            path.with_file_name(format!("{stem} (conflicted copy).{}", ext.to_string_lossy()))
-        }
+        (Some(stem), Some(ext)) => path.with_file_name(format!(
+            "{stem} (conflicted copy).{}",
+            ext.to_string_lossy()
+        )),
         (Some(stem), None) => path.with_file_name(format!("{stem} (conflicted copy)")),
         _ => path.with_extension("conflicted"),
     }
@@ -586,8 +589,13 @@ fn is_safe_worker_url(url: &str) -> bool {
     let Some(rest) = u.strip_prefix("http://") else {
         return false; // no scheme, or something that is not http(s)
     };
-    let host = rest.split(['/', ':']).next().unwrap_or("");
-    matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
+    // An IPv6 literal is bracketed and contains colons, so it has to be cut
+    // out before splitting on ':' for the port.
+    let host = match rest.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => rest.split(['/', ':']).next().unwrap_or(""),
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
 }
 
 /// Merge a config update onto an existing config, preserving the sync ledger and
@@ -619,7 +627,8 @@ fn set_sync_config(
 ) -> Result<(), String> {
     if !is_safe_worker_url(&url) {
         return Err(
-            "The worker URL must start with https:// — every request carries your              sync token, and plain http would send it in the clear."
+            "The worker URL must start with https://. Every request carries your \
+                    sync token, and plain http would send it in the clear."
                 .into(),
         );
     }
@@ -672,11 +681,7 @@ async fn sync_test_connection(app: AppHandle) -> Result<TestResult, String> {
         resp.json::<serde_json::Value>()
             .await
             .ok()
-            .and_then(|v| {
-                v.get("version")
-                    .and_then(|x| x.as_str())
-                    .map(String::from)
-            })
+            .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(String::from))
     } else {
         None
     };
@@ -941,7 +946,9 @@ async fn sync_now(app: AppHandle) -> Result<(), String> {
     }
     let _ = app.emit("sync:status", serde_json::json!({ "state": "syncing" }));
     let result = sync_once(&app).await;
-    app.state::<SyncState>().running.store(false, Ordering::SeqCst);
+    app.state::<SyncState>()
+        .running
+        .store(false, Ordering::SeqCst);
     match result {
         Ok(changed) => {
             if changed {
@@ -1021,7 +1028,11 @@ fn http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
 }
 
 /// Fetch the live share registry from the worker (`GET /shares`) into a cache map.
-async fn fetch_shares(client: &reqwest::Client, base: &str, token: &str) -> Result<ShareCache, String> {
+async fn fetch_shares(
+    client: &reqwest::Client,
+    base: &str,
+    token: &str,
+) -> Result<ShareCache, String> {
     #[derive(Deserialize)]
     struct Row {
         #[serde(rename = "draftId")]
@@ -1049,7 +1060,15 @@ async fn fetch_shares(client: &reqwest::Client, base: &str, token: &str) -> Resu
     Ok(list
         .shares
         .into_iter()
-        .map(|r| (r.draft_id, ShareInfo { share_id: r.share_id, url: r.url }))
+        .map(|r| {
+            (
+                r.draft_id,
+                ShareInfo {
+                    share_id: r.share_id,
+                    url: r.url,
+                },
+            )
+        })
         .collect())
 }
 
@@ -1096,7 +1115,10 @@ async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
         return Err(format!("share failed ({})", resp.status().as_u16()));
     }
     let r: Resp = resp.json().await.map_err(|e| e.to_string())?;
-    let info = ShareInfo { share_id: r.share_id, url: r.url };
+    let info = ShareInfo {
+        share_id: r.share_id,
+        url: r.url,
+    };
 
     let mut cache = read_shares(&app);
     cache.insert(id, info.clone());
@@ -1205,7 +1227,10 @@ fn take_opened_files(app: AppHandle) -> Vec<String> {
 /// launch-time CLI scan and the single-instance forward, so both behave the same.
 #[cfg(not(target_os = "macos"))]
 fn file_paths_from_args<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
-    args.into_iter().skip(1).filter(|a| !a.starts_with('-')).collect()
+    args.into_iter()
+        .skip(1)
+        .filter(|a| !a.starts_with('-'))
+        .collect()
 }
 
 /// File paths on this process's command line. Used for Windows/Linux
@@ -1379,13 +1404,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .build()?;
 
     let menu = MenuBuilder::new(app)
-        .items(&[
-            &app_menu,
-            &file_menu,
-            &edit_menu,
-            &view_menu,
-            &window_menu,
-        ])
+        .items(&[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu])
         .build()?;
 
     app.set_menu(menu)?;
@@ -1521,7 +1540,8 @@ pub fn run() {
             let id = event.id().0.as_str();
             if matches!(
                 id,
-                "new" | "open"
+                "new"
+                    | "open"
                     | "save"
                     | "save_as"
                     | "close_tab"
@@ -1671,7 +1691,12 @@ mod tests {
 
     #[test]
     fn update_preserves_token_when_none() {
-        let out = apply_config_update(cfg_with_token("secret"), true, "https://new.example".into(), None);
+        let out = apply_config_update(
+            cfg_with_token("secret"),
+            true,
+            "https://new.example".into(),
+            None,
+        );
         assert_eq!(out.token, "secret"); // token untouched
         assert!(out.enabled);
         assert_eq!(out.url, "https://new.example");
@@ -1679,13 +1704,23 @@ mod tests {
 
     #[test]
     fn update_preserves_token_when_empty_string() {
-        let out = apply_config_update(cfg_with_token("secret"), false, "https://x".into(), Some(String::new()));
+        let out = apply_config_update(
+            cfg_with_token("secret"),
+            false,
+            "https://x".into(),
+            Some(String::new()),
+        );
         assert_eq!(out.token, "secret");
     }
 
     #[test]
     fn update_replaces_token_when_supplied() {
-        let out = apply_config_update(cfg_with_token("old"), false, "https://x".into(), Some("new".into()));
+        let out = apply_config_update(
+            cfg_with_token("old"),
+            false,
+            "https://x".into(),
+            Some("new".into()),
+        );
         assert_eq!(out.token, "new");
     }
 
@@ -1698,7 +1733,12 @@ mod tests {
 
     #[test]
     fn update_normalizes_trailing_slashes() {
-        let out = apply_config_update(SyncConfig::default(), false, "  https://x.example///  ".into(), None);
+        let out = apply_config_update(
+            SyncConfig::default(),
+            false,
+            "  https://x.example///  ".into(),
+            None,
+        );
         assert_eq!(out.url, "https://x.example");
     }
 
@@ -1739,7 +1779,10 @@ mod tests {
         assert_eq!(fs::read_to_string(&file).unwrap(), "hello");
         // The entry describes the file as it now is, not as the caller thought.
         assert_eq!(stored.file_mtime, mtime_ms(file.to_str().unwrap()));
-        assert!(!is_conflict(stored.file_mtime, mtime_ms(file.to_str().unwrap())));
+        assert!(!is_conflict(
+            stored.file_mtime,
+            mtime_ms(file.to_str().unwrap())
+        ));
     }
 
     #[test]
@@ -1848,7 +1891,9 @@ mod tests {
         assert!(is_safe_worker_url("")); // not configured yet
         assert!(is_safe_worker_url("http://localhost:8787"));
         assert!(is_safe_worker_url("http://127.0.0.1:8787/"));
+        assert!(is_safe_worker_url("http://[::1]:8787"));
 
+        assert!(!is_safe_worker_url("http://[2001:db8::1]:8787"));
         assert!(!is_safe_worker_url("http://jotter.example.com"));
         assert!(!is_safe_worker_url("http://192.168.1.10:8787"));
         // A host merely starting with "localhost" is a different host.
@@ -1859,7 +1904,10 @@ mod tests {
 
     #[test]
     fn normalize_url_trims_space_and_trailing_slashes() {
-        assert_eq!(normalize_url("  https://x.example///  "), "https://x.example");
+        assert_eq!(
+            normalize_url("  https://x.example///  "),
+            "https://x.example"
+        );
         assert_eq!(normalize_url("https://x.example"), "https://x.example");
         assert_eq!(normalize_url(""), "");
     }
@@ -2210,4 +2258,3 @@ mod tests {
         assert!(result.is_err()); // 401 on the pull list -> Err (drives sync:status error)
     }
 }
-

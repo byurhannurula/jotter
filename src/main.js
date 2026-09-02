@@ -2112,8 +2112,18 @@ function renderSyncSection() {
   verifyBtn.addEventListener("click", async () => {
     verifyBtn.disabled = true;
     setPill("Verifying…", "");
+    // Save first; the test reads the stored url + token in Rust. A refused save
+    // (a cleartext URL, say) is a rule the user needs to read, not a network
+    // failure, so it gets its own message rather than "Unreachable".
     try {
-      await save(); // save first; the test reads the stored url + token in Rust
+      await save();
+    } catch (err) {
+      setPill("Not saved", "err");
+      showToast(String(err), { timeout: 9000 });
+      updateEnabled();
+      return;
+    }
+    try {
       const r = await invoke("sync_test_connection");
       if (r.ok) verifiedOk = true;
       const { label, kind } = verifyResultToPill(r);
