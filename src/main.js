@@ -521,7 +521,7 @@ function onFileConflict(d) {
         d.content = text;
         d.file_mtime = mtime;
         if (d.id === currentId) {
-          editor.value = text;
+          showInEditor(d.id, text);
           queueStatus();
         }
         renderAll();
@@ -542,6 +542,14 @@ function onFileConflict(d) {
 async function persist() {
   const d = drafts.get(currentId);
   if (!d) return;
+  // Only trust the textarea when it is actually showing this draft. Every save
+  // path reads editor.value, so a bug that moves currentId without loading the
+  // editor would otherwise write an empty string over a real note — and over
+  // its file on disk. Refusing to save is always recoverable; this is not.
+  if (editorDraftId !== currentId) {
+    console.error("persist skipped: editor is showing", editorDraftId, "not", currentId);
+    return;
+  }
   d.content = editor.value; // pull the latest text at save time
   if (isEmpty(d)) return; // don't write empty untouched blanks
   await saveDraft(d);
@@ -576,7 +584,7 @@ async function flush() {
 function startBlankSession() {
   const empty = { openTabs: [], currentId: null, closedStack: [] };
   runTabEffects(applyTabs(tabModel.activateBlank(empty, tabDeps)));
-  editor.value = "";
+  showInEditor(currentId, "");
 }
 
 /** Snapshot the globals in the shape lib/tabs.js expects. */
@@ -630,7 +638,7 @@ async function activate(id) {
     }
   }
   currentId = id;
-  editor.value = d.content;
+  showInEditor(id, d.content);
   // Switching doesn't change the list or tab set — just move the highlight,
   // so the sidebar/tabs don't rebuild and replay their entrance animation.
   setActiveHighlights();
@@ -643,7 +651,12 @@ async function activate(id) {
 async function openInTab(id) {
   if (!drafts.has(id)) return;
   const wasOpen = openTabs.includes(id);
-  runTabEffects(applyTabs(tabModel.openInTab(tabState(), tabDeps, id)));
+  const { state, effects } = tabModel.openInTab(tabState(), tabDeps, id);
+  // Only the tab list is taken here. activate() owns currentId — it returns
+  // early when the id is already current, so setting it first would skip the
+  // load and leave the editor showing the previous draft's text.
+  openTabs = state.openTabs;
+  runTabEffects(effects);
   if (!wasOpen) renderTabs(); // a genuinely new tab appears (and animates in)
   await activate(id);
 }
@@ -651,7 +664,7 @@ async function openInTab(id) {
 async function newTab() {
   await flush();
   runTabEffects(applyTabs(tabModel.newTab(tabState(), tabDeps)));
-  editor.value = "";
+  showInEditor(currentId, "");
   if (searchEl.value) {
     searchEl.value = "";
     searchQuery = "";
@@ -676,12 +689,12 @@ async function closeTab(id) {
   runTabEffects(applyTabs(result));
 
   if (isNewBlank) {
-    editor.value = "";
+    showInEditor(currentId, "");
     renderTabs(); // the fresh blank tab appears
   } else {
     // Close doesn't re-read from disk the way activate() does: the tab was
     // already open, so the model's copy is the newest one.
-    if (activated) editor.value = drafts.get(activated).content;
+    if (activated) showInEditor(activated, drafts.get(activated).content);
     // Drop only the closed tab's element so the others don't re-animate.
     tabsEl.querySelector(`.tab[data-id="${CSS.escape(id)}"]`)?.remove();
   }
@@ -716,7 +729,7 @@ function removeDraftFromView(id) {
   const wasCurrent = currentId === id;
   previewTabs.delete(id);
   runTabEffects(applyTabs(tabModel.removeDraftFromView(tabState(), tabDeps, id)));
-  if (wasCurrent) editor.value = drafts.get(currentId)?.content ?? "";
+  if (wasCurrent) showInEditor(currentId, drafts.get(currentId)?.content ?? "");
   renderAll();
   if (wasOpen) focusEnd();
 }
@@ -779,6 +792,20 @@ function onInput() {
 
 /** One indent step per `tabkey` setting value. */
 const TAB_UNITS = { tab: "\t", 2: "  ", 4: "    " };
+
+/** Which draft's text the textarea is currently showing. Guards the save path:
+ *  see persist(). */
+let editorDraftId = null;
+
+/** Put a draft's text into the editor and record whose text it is.
+ *
+ *  Every assignment to editor.value that changes which draft is on screen goes
+ *  through here, so the two can never disagree — which is what let a tab switch
+ *  leave the editor empty and autosave write that emptiness over a real note. */
+function showInEditor(id, text) {
+  editor.value = text;
+  editorDraftId = id;
+}
 
 /** Whether Escape has armed the tab-out. The rule lives in lib/keys.js. */
 let tabEscapes = false;
@@ -871,7 +898,7 @@ async function openPathInTab(path) {
   if (existing) {
     if (existing.id !== scratchId) dropScratch(scratchId);
     runTabEffects(applyTabs(tabModel.openInTab(tabState(), tabDeps, existing.id)));
-    editor.value = existing.content;
+    showInEditor(existing.id, existing.content);
     renderTabs();
     renderList();
     updateWindowTitle();
@@ -910,7 +937,7 @@ async function openPathInTab(path) {
     drafts.set(d.id, d);
     runTabEffects(applyTabs(tabModel.openInTab(tabState(), tabDeps, d.id)));
   }
-  editor.value = content;
+  showInEditor(currentId, content);
   renderTabs();
   renderList();
   updateWindowTitle();
@@ -2077,7 +2104,7 @@ async function refreshFromSync() {
     editor.value,
   );
   for (const upd of updates) drafts.set(upd.id, upd);
-  if (editorContent !== null) editor.value = editorContent;
+  if (editorContent !== null) showInEditor(currentId, editorContent);
   for (const id of removals) removeDraftFromView(id);
   renderAll();
 }
@@ -2706,7 +2733,7 @@ function closeFind() {
 }
 
 function applyEditorValue(newVal, caret) {
-  editor.value = newVal;
+  showInEditor(currentId, newVal);
   if (caret != null) editor.setSelectionRange(caret, caret);
   // Commit synchronously so replace can read fresh matches immediately.
   const d = drafts.get(currentId);
