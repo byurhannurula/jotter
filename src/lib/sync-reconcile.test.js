@@ -77,3 +77,23 @@ describe("reconcileDrafts", () => {
     expect(removals).toEqual([]);
   });
 });
+
+describe("reconcileDrafts with an unsaved active edit", () => {
+  it("leaves the editor alone when the active draft is dirty, even if editor and model match", () => {
+    // flushUi copies the textarea into the model every frame, so "editor
+    // equals model" is true mid-edit too. Found by the random-session test:
+    // type, then a sync lands, and the typed text was replaced.
+    const model = new Map([["a", { id: "a", content: "typed", updated_at: 10, file_path: null }]]);
+    const store = [{ id: "a", content: "from the cloud", updated_at: 20, file_path: null }];
+    const r = reconcileDrafts(store, model, "a", "typed", true);
+    expect(r.updates).toEqual([]);
+    expect(r.editorContent).toBe(null);
+  });
+
+  it("adopts a newer copy of the active draft when nothing is unsaved", () => {
+    const model = new Map([["a", { id: "a", content: "old", updated_at: 10, file_path: null }]]);
+    const store = [{ id: "a", content: "from the cloud", updated_at: 20, file_path: null }];
+    const r = reconcileDrafts(store, model, "a", "old", false);
+    expect(r.editorContent).toBe("from the cloud");
+  });
+});

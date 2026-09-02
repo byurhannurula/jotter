@@ -8,13 +8,14 @@ import { isEmpty } from "./text.js";
  * @param {Array} storeList  drafts from list_drafts: {id, content, updated_at, file_path}
  * @param {Map} model        id -> draft currently in memory
  * @param {string|null} currentId  the active draft (its unsaved edits must not be clobbered)
- * @param {string} editorValue     current editor text (detects an unsaved active edit)
+ * @param {string} editorValue     current editor text
+ * @param {boolean} currentDirty   the active draft has edits the store has not seen
  * @returns {{updates: Array, removals: string[], editorContent: string|null}}
  *   updates  — drafts to set into the model
  *   removals — ids to drop from the view (remotely deleted)
  *   editorContent — new text for the active draft, or null to leave the editor alone
  */
-export function reconcileDrafts(storeList, model, currentId, editorValue) {
+export function reconcileDrafts(storeList, model, currentId, editorValue, currentDirty = false) {
   const store = new Map(storeList.map((d) => [d.id, d]));
   const updates = [];
   let editorContent = null;
@@ -28,8 +29,11 @@ export function reconcileDrafts(storeList, model, currentId, editorValue) {
     }
     if (sd.updated_at <= cur.updated_at) continue; // ours is same or newer
     if (id === currentId) {
-      // Only adopt if the editor isn't mid-edit (still matches the known content).
-      if (editorValue === cur.content) {
+      // Only adopt when nothing typed is waiting to be saved. The editor text
+      // alone cannot tell: the model is refreshed from the textarea every
+      // frame, so the two match even mid-edit. The caller knows what is
+      // unsaved; the text comparison stays as a second guard.
+      if (!currentDirty && editorValue === cur.content) {
         updates.push(sd);
         editorContent = sd.content;
       }

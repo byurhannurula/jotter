@@ -508,6 +508,12 @@ function togglePreview() {
 /** In-flight save per draft id, so two never overlap. */
 const saving = new Map();
 
+/** Ids with edits the store has not seen. Every tab switch flushes, and
+ *  flushing a draft nobody typed in rewrote its JSON and its text file for
+ *  nothing: a sync client saw an edit, and a file changed outside the app
+ *  came back as a conflict the user never caused. */
+const unsaved = new Set();
+
 /** Write a draft, one save at a time per draft.
  *
  *  Autosave and ⌘S can both call this within a few milliseconds. Running them
@@ -528,6 +534,11 @@ async function saveDraft(d, opts = {}) {
 }
 
 async function writeDraft(d, { sync = true } = {}) {
+  // Cleared as the write starts, so a keystroke during it sets the flag
+  // again; put back if the write is refused, so the next attempt retries.
+  // Here rather than in persist(): a rename or a pin writes the draft too,
+  // and must count as "nothing unsaved" for the next sync pull.
+  unsaved.delete(d.id);
   try {
     // The command hands back the backing file's mtime so the next save can tell
     // whether anything else has written to it.
@@ -535,6 +546,7 @@ async function writeDraft(d, { sync = true } = {}) {
     if (sync) scheduleSync();
     return true;
   } catch (err) {
+    unsaved.add(d.id);
     if (String(err) === "conflict") {
       await onFileConflict(d);
       return false;
@@ -590,6 +602,7 @@ async function onFileConflict(d) {
           const [text, mtime] = await invoke("read_text_file", { path: d.file_path });
           d.content = text;
           d.file_mtime = mtime;
+          unsaved.delete(d.id);
           if (d.id === currentId) {
             showInEditor(d.id, text);
             queueStatus();
@@ -613,7 +626,7 @@ async function onFileConflict(d) {
 
 async function persist() {
   const d = drafts.get(currentId);
-  if (!d) return;
+  if (!d || !unsaved.has(d.id)) return;
   // Only trust the textarea when it is actually showing this draft. A bug that
   // moves currentId without loading the editor would otherwise write an empty
   // string over a real note — and over its file on disk. Refusing to save is
@@ -701,10 +714,11 @@ async function activate(id, { focusEditor = true } = {}) {
       const [text, mtime] = await invoke("read_text_file", { path: d.file_path });
       d.content = text;
       d.file_mtime = mtime; // what a later save will compare against
+      unsaved.delete(id); // what is in memory is what is on disk
       clearConflict(id); // the disk copy is what is on screen now
     } catch {
       showToast(`"${draftTitle(d)}" is no longer on disk`);
-      removeDraftFromView(id);
+      await removeDraftFromView(id);
       return;
     }
   }
@@ -806,27 +820,33 @@ async function closeTab(id) {
   if (result.state === before) return; // not open, or the only blank tab
 
   previewTabs.delete(id);
-  const activated = result.effects.find((e) => e.type === "activate")?.id;
+  const next = result.state.currentId;
   // An id that wasn't open before is the blank the model spawned for an
   // otherwise empty window.
-  const isNewBlank = activated && !before.openTabs.includes(activated);
-  runTabEffects(applyTabs(result));
+  const isNewBlank = !before.openTabs.includes(next);
+  commitTabs(result);
 
   if (isNewBlank) {
-    showInEditor(currentId, "");
     renderTabs(); // the fresh blank tab appears
   } else {
-    // Close doesn't re-read from disk the way activate() does: the tab was
-    // already open, so the model's copy is the newest one.
-    if (activated) showInEditor(activated, drafts.get(activated).content);
     // Drop only the closed tab's element so the others don't re-animate.
     tabsEl.querySelector(`.tab[data-id="${CSS.escape(id)}"]`)?.remove();
   }
-  // The sidebar list doesn't change on close — just move the highlight.
-  setActiveHighlights();
-  updateWindowTitle();
-  updateStatus();
-  focusEnd();
+  // Through activate(), like every other way of becoming current: it re-reads
+  // a file-backed neighbour, loads the editor and moves the highlight. A no-op
+  // when the closed tab was not the current one.
+  await activate(next);
+}
+
+/** Write a transition's tab list and reopen stack back, but not currentId:
+ *  activate() owns that, and it must see the old value to know it is
+ *  switching. Returns the effects for runTabEffects. */
+function commitTabs({ state, effects }) {
+  openTabs = state.openTabs;
+  closedStack.length = 0;
+  closedStack.push(...state.closedStack);
+  runTabEffects(effects);
+  return effects;
 }
 
 function cycleTab(dir) {
@@ -848,14 +868,16 @@ function reopenClosedTab() {
 }
 
 /** Remove a draft from the in-memory model + UI (does not touch disk). */
-function removeDraftFromView(id) {
+async function removeDraftFromView(id) {
   const wasOpen = openTabs.includes(id);
-  const wasCurrent = currentId === id;
   previewTabs.delete(id);
-  runTabEffects(applyTabs(tabModel.removeDraftFromView(tabState(), tabDeps, id)));
-  if (wasCurrent) showInEditor(currentId, drafts.get(currentId)?.content ?? "");
+  const result = tabModel.removeDraftFromView(tabState(), tabDeps, id);
+  commitTabs(result);
+  // activate() re-reads a file-backed neighbour and loads the editor; when the
+  // removed draft was not current this is a no-op. currentId may still name
+  // the removed draft here, which activate treats as "switching from nothing".
+  await activate(result.state.currentId, { focusEditor: wasOpen });
   renderAll();
-  if (wasOpen) focusEnd();
 }
 
 async function deleteDraft(id) {
@@ -871,14 +893,14 @@ async function deleteDraft(id) {
     if (!confirmed) return;
     await invoke("delete_draft", { id }).catch((e) => console.error(e));
     revokeShareOnDelete(id); // a deleted note must not stay live at its public link
-    removeDraftFromView(id);
+    await removeDraftFromView(id);
     return;
   }
 
   // Undo mode: remove from view now, purge from disk after a grace period. The id
   // stays in pendingDelete until delete_draft actually resolves, so a sync can't
   // resurrect the draft in the gap between the timer firing and the file being gone.
-  removeDraftFromView(id);
+  await removeDraftFromView(id);
   const timer = setTimeout(async () => {
     try {
       await invoke("delete_draft", { id });
@@ -900,8 +922,10 @@ async function deleteDraft(id) {
       renderList();
       // The store may never have had this draft: deleted inside the autosave
       // window, its text existed only in memory, and undo alone would leave it
-      // there until the next edit. Write it so a quit right now keeps it.
-      if (!isEmpty(d)) await saveDraft(d);
+      // there until the next edit. Write it so a quit right now keeps it. A
+      // draft with nothing unsaved is left alone; writing it could only add a
+      // conflict on a file changed outside meanwhile.
+      if (!isEmpty(d) && unsaved.has(id)) await saveDraft(d);
     },
   });
 }
@@ -912,6 +936,7 @@ function onInput() {
   const d = drafts.get(currentId);
   if (!d) return;
   d.updated_at = Date.now();
+  unsaved.add(d.id);
   scheduleSave();
   if (!uiRaf) uiRaf = requestAnimationFrame(flushUi);
 }
@@ -2266,10 +2291,14 @@ async function refreshFromSync() {
     drafts,
     currentId,
     editor.value,
+    unsaved.has(currentId), // typed text waiting for autosave must win over the pull
   );
-  for (const upd of updates) drafts.set(upd.id, upd);
+  for (const upd of updates) {
+    drafts.set(upd.id, upd);
+    unsaved.delete(upd.id); // the store's copy is now the model's copy
+  }
   if (editorContent !== null) showInEditor(currentId, editorContent);
-  for (const id of removals) removeDraftFromView(id);
+  for (const id of removals) await removeDraftFromView(id);
   renderAll();
 }
 
@@ -2908,6 +2937,7 @@ function applyEditorValue(newVal, caret) {
   if (d) {
     d.content = newVal;
     d.updated_at = Date.now();
+    unsaved.add(d.id);
   }
   if (find.open) computeMatches();
   scheduleSave();
@@ -3294,7 +3324,7 @@ async function init() {
 
   window.addEventListener("beforeunload", () => {
     const d = drafts.get(currentId);
-    const text = d ? editorTextFor(currentId) : null;
+    const text = d && unsaved.has(d.id) ? editorTextFor(currentId) : null;
     if (d && text !== null) {
       d.content = text;
       if (!isEmpty(d)) invoke("save_draft", { draft: d });
