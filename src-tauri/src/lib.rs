@@ -371,9 +371,23 @@ fn save_draft(app: AppHandle, mut draft: Draft) -> Result<Option<i64>, String> {
         }
     }
     write_draft(&app, &draft)?;
-    clear_tombstone(&app, &draft.id); // a re-saved draft is no longer deleted
+    // A re-saved draft is no longer deleted — but only if it is one that syncs.
+    // A file draft opted back out has a tombstone waiting to remove its remote
+    // copy, and clearing that on every autosave would strand it in the cloud.
+    if syncs_to_cloud(&draft) {
+        clear_tombstone(&app, &draft.id);
+    }
     draft.file_mtime = draft.file_path.as_deref().and_then(mtime_ms);
     Ok(draft.file_mtime)
+}
+
+/// Ask the next sync to remove this draft's copy from the cloud while keeping it
+/// locally. Used when a file draft is opted back out of sync: the note has
+/// already left the machine, so turning the flag off is not enough on its own.
+#[tauri::command]
+fn forget_remote_copy(app: AppHandle, id: String) -> Result<(), String> {
+    record_tombstone(&app, &id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1466,6 +1480,7 @@ pub fn run() {
             synced_ids,
             get_drafts_dir,
             set_drafts_dir,
+            forget_remote_copy,
             create_share,
             revoke_share,
             refresh_shares,

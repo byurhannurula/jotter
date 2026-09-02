@@ -2429,7 +2429,7 @@ function openDraftMenu(e, id) {
     // specific one into cloud sync. In-app drafts always sync, so no entry there.
     if (hasFile) {
       if (d.cloud) {
-        items.push({ label: "Syncing to Cloud", disabled: true });
+        items.push({ label: "Stop Syncing to Cloud", action: () => stopSyncingFile(id) });
       } else {
         items.push({ label: "Sync to Cloud", action: () => syncFileToCloud(id) });
       }
@@ -2456,10 +2456,10 @@ function openDraftMenu(e, id) {
   showContextMenu(e.clientX, e.clientY, items);
 }
 
-// Opt a file-backed draft into cloud sync (one-way). The on-disk file stays the
-// source of truth — this just lets the note's content ride to the cloud on the
-// next sync, like an in-app draft. `cloud` is a Draft field, so the choice
-// persists and the sync engine's push guard (`syncs_to_cloud`) honors it.
+// Opt a file-backed draft into cloud sync. Not one-way: once a file draft syncs
+// it is treated like any other, so a newer copy arriving from another device
+// overwrites the file on disk. `cloud` is a Draft field, so the choice travels
+// with the draft and survives a restart.
 async function syncFileToCloud(id) {
   const d = drafts.get(id);
   if (!d || !d.file_path) return;
@@ -2469,6 +2469,31 @@ async function syncFileToCloud(id) {
   } else {
     d.cloud = false; // roll back so the menu still offers it
     showToast("Couldn't enable sync for this file");
+  }
+}
+
+/** Opt a file draft back out, and take the copy already in the cloud with it.
+ *
+ *  Turning the flag off alone would leave the note sitting on the worker, which
+ *  is not what someone who just changed their mind about uploading it means. The
+ *  save has to come first: it clears any stale tombstone, and the new one is
+ *  what the next sync acts on. */
+async function stopSyncingFile(id) {
+  const d = drafts.get(id);
+  if (!d || !d.cloud) return;
+  d.cloud = false;
+  if (!(await saveDraft(d, { sync: false }))) {
+    d.cloud = true;
+    showToast("Couldn't stop syncing this file");
+    return;
+  }
+  try {
+    await invoke("forget_remote_copy", { id });
+    scheduleSync();
+    showToast("Stopped syncing — removing the cloud copy");
+  } catch (err) {
+    console.error("forget_remote_copy failed:", err);
+    showToast("Stopped syncing, but the cloud copy may remain");
   }
 }
 
