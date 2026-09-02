@@ -8,6 +8,9 @@ import {
   relTime,
   findMatches,
   indentEdit,
+  draftMatches,
+  lineCol,
+  countWords,
 } from "./text.js";
 
 describe("baseName", () => {
@@ -184,4 +187,38 @@ describe("indentEdit", () => {
     const edit = indentEdit(text, 0, 0, "    ", true);
     expect(edit.selStart).toBe(0);
   });
+});
+
+describe("draftMatches", () => {
+  const d = { title: "", content: "Shopping list\nmilk and eggs", file_path: null };
+  it("matches everything on an empty query", () => expect(draftMatches(d, "")).toBe(true));
+  it("matches the title case-insensitively", () => expect(draftMatches(d, "shopping")).toBe(true));
+  it("matches the content", () => expect(draftMatches(d, "eggs")).toBe(true));
+  it("matches a file's name through the display title", () => {
+    expect(draftMatches({ ...d, content: "", file_path: "/x/Notes.txt" }, "notes")).toBe(true);
+  });
+  it("matches a user-set title", () => {
+    expect(draftMatches({ ...d, title: "Groceries" }, "grocer")).toBe(true);
+  });
+  it("does not match text that is not there", () => expect(draftMatches(d, "zzz")).toBe(false));
+});
+
+describe("lineCol", () => {
+  it("starts at line 1, col 1", () => expect(lineCol("abc", 0)).toEqual({ line: 1, col: 1 }));
+  it("counts columns on the first line", () =>
+    expect(lineCol("abc", 2)).toEqual({ line: 1, col: 3 }));
+  it("moves to the next line after a newline", () => {
+    expect(lineCol("ab\ncd", 3)).toEqual({ line: 2, col: 1 });
+    expect(lineCol("ab\ncd", 5)).toEqual({ line: 2, col: 3 });
+  });
+  it("treats CRLF as one line break, with the CR as a column", () => {
+    expect(lineCol("ab\r\ncd", 4)).toEqual({ line: 2, col: 1 });
+  });
+  it("handles empty text", () => expect(lineCol("", 0)).toEqual({ line: 1, col: 1 }));
+});
+
+describe("countWords", () => {
+  it("counts whitespace-separated words", () => expect(countWords("  a  b\n c ")).toBe(3));
+  it("is zero for blank text", () => expect(countWords("   ")).toBe(0));
+  it("is zero for empty text", () => expect(countWords("")).toBe(0));
 });

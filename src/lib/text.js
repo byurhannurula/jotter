@@ -140,6 +140,34 @@ export function indentEdit(text, start, end, unit, outdent = false) {
   return { from, to, text: replacement, selStart, selEnd };
 }
 
+/** Whether a draft matches a sidebar / quick-switcher query: case-insensitive,
+ *  over the display title and the content. `q` is already trimmed and
+ *  lower-cased; an empty query matches everything. One rule for both surfaces. */
+export function draftMatches(d, q) {
+  if (!q) return true;
+  return draftTitle(d).toLowerCase().includes(q) || d.content.toLowerCase().includes(q);
+}
+
+/** 1-based line and column of `offset` in `text`. Scans only up to the offset
+ *  and allocates nothing, so it is fine to call once per frame on a large note. */
+export function lineCol(text, offset) {
+  let line = 1;
+  let lastNl = -1;
+  for (let i = 0; i < offset; i += 1) {
+    if (text.charCodeAt(i) === 10) {
+      line += 1;
+      lastNl = i;
+    }
+  }
+  return { line, col: offset - lastNl };
+}
+
+/** Whitespace-separated word count. */
+export function countWords(text) {
+  const t = text.trim();
+  return t ? t.split(/\s+/).length : 0;
+}
+
 /** All `[start, end)` offsets of `query` in `text`. Plain (non-overlapping) substring search. */
 export function findMatches(text, query, caseSensitive = false) {
   const matches = [];

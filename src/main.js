@@ -15,6 +15,9 @@ import {
   relTime,
   findMatches,
   indentEdit,
+  draftMatches,
+  lineCol,
+  countWords,
 } from "./lib/text.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
@@ -117,11 +120,7 @@ function orderedDrafts() {
 }
 
 function matchesSearch(d) {
-  if (!searchQuery) return true;
-  return (
-    draftTitle(d).toLowerCase().includes(searchQuery) ||
-    d.content.toLowerCase().includes(searchQuery)
-  );
+  return draftMatches(d, searchQuery);
 }
 
 function createBlankDraft() {
@@ -419,30 +418,28 @@ function queueStatus() {
   });
 }
 
+// Resolved once in init(); updateStatus runs once per frame while typing.
+let statusPosEl, statusCountEl;
+
 function updateStatus() {
   if (getSetting("statusbar") === "off") return;
-  const posEl = document.getElementById("status-pos");
-  const countEl = document.getElementById("status-count");
-  if (!posEl || !countEl) return;
+  if (!statusPosEl || !statusCountEl) return;
 
   // Use the model's copy (kept in sync by flushUi/applyEditorValue) rather than
   // re-reading the whole textarea value every frame.
   const d = drafts.get(currentId);
   const text = d ? d.content : "";
-  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  const words = countWords(text);
   const chars = text.length;
-  countEl.textContent =
+  statusCountEl.textContent =
     `${words} ${words === 1 ? "word" : "words"} · ` + `${chars} ${chars === 1 ? "char" : "chars"}`;
 
   if (previewTabs.has(currentId)) {
-    posEl.textContent = "Preview";
+    statusPosEl.textContent = "Preview";
     return;
   }
-  const caret = editor.selectionStart;
-  const before = text.slice(0, caret);
-  const line = before.split("\n").length;
-  const col = caret - before.lastIndexOf("\n"); // 1-based (no newline → col 1)
-  posEl.textContent = `Ln ${line}, Col ${col}`;
+  const { line, col } = lineCol(text, editor.selectionStart);
+  statusPosEl.textContent = `Ln ${line}, Col ${col}`;
 }
 
 function refreshPreview() {
@@ -2644,11 +2641,7 @@ let switcherSel = 0;
 
 function switcherMatches(query) {
   const q = query.trim().toLowerCase();
-  return orderedDrafts().filter(
-    (d) =>
-      isSaved(d) &&
-      (!q || draftTitle(d).toLowerCase().includes(q) || d.content.toLowerCase().includes(q)),
-  );
+  return orderedDrafts().filter((d) => isSaved(d) && draftMatches(d, q));
 }
 
 function renderSwitcher(query) {
@@ -2743,7 +2736,7 @@ function updateFindCount() {
 }
 
 function scrollToOffset(offset) {
-  const line = editor.value.slice(0, offset).split("\n").length - 1;
+  const line = lineCol(editor.value, offset).line - 1;
   const lh = parseFloat(getComputedStyle(editor).lineHeight) || 22;
   const y = line * lh;
   if (y < editor.scrollTop || y > editor.scrollTop + editor.clientHeight - lh * 2) {
@@ -2927,6 +2920,8 @@ async function init() {
   tabsEl = document.getElementById("tabs");
   searchEl = document.getElementById("search");
   previewEl = document.getElementById("preview");
+  statusPosEl = document.getElementById("status-pos");
+  statusCountEl = document.getElementById("status-count");
 
   // Sidebar always starts closed (state is not remembered between launches).
   document.body.classList.add("sidebar-hidden");
