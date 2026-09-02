@@ -422,6 +422,22 @@ fn clear_tombstone(app: &AppHandle, id: &str) {
     let _ = write_sync_config(app, &cfg);
 }
 
+/// Reveal the drafts folder in the system file manager.
+///
+/// Goes through the plugin's Rust API rather than the webview's `openPath`:
+/// that command is scope-checked, and with no `allow` entries the check refuses
+/// every path. Granting the webview a wildcard path scope to open one known
+/// folder is the wrong trade, so the folder is opened from here instead — the
+/// webview never names a path at all.
+#[tauri::command]
+fn open_drafts_dir(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = drafts_dir(&app)?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// Resolve a path to its canonical form: symlinks followed, `.`/`..` removed,
 /// and on macOS `/tmp` expanded to `/private/tmp`.
 ///
@@ -1516,6 +1532,7 @@ pub fn run() {
             synced_ids,
             get_drafts_dir,
             set_drafts_dir,
+            open_drafts_dir,
             forget_remote_copy,
             create_share,
             revoke_share,

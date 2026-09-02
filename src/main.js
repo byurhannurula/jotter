@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { homeDir } from "@tauri-apps/api/path";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -1589,12 +1589,12 @@ function renderStorageSection() {
   show.className = "prompt-btn sync-btn";
   show.textContent = "Show in Finder";
   show.addEventListener("click", async () => {
-    if (!draftsDirPath) return;
-    // openPath opens the folder; revealItemInDir would select it in its parent,
-    // which is not what "show me my drafts folder" means.
+    // The Rust side knows the folder and opens it there: the webview's openPath
+    // is scope-checked and would need a wildcard path grant to work at all.
     try {
-      await openPath(draftsDirPath);
-    } catch {
+      await invoke("open_drafts_dir");
+    } catch (err) {
+      console.error("open_drafts_dir failed:", err);
       showToast("Couldn't open the drafts folder");
     }
   });

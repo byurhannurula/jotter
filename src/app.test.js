@@ -11,10 +11,13 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { mockIPC, mockWindows, clearMocks } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 
-const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
+// import.meta.url is not a file: URL under happy-dom, so resolve from the
+// project root, which is where vitest runs.
+const html = readFileSync(resolve(process.cwd(), "src/index.html"), "utf8");
 const bodyHtml = html.slice(html.indexOf("<body"), html.indexOf("</body>"));
 const bodyInner = bodyHtml.slice(bodyHtml.indexOf(">") + 1);
 
@@ -338,12 +341,12 @@ describe("a mixed session", () => {
     expected.set("draft-a", "alpha 2");
     await app.clickDraft("draft-b");
     check();
-    await app.menu("next_tab");
+    await app.menu("prev_tab"); // tabs are [blank, a, b]: back to a
     check();
     await app.type("alpha 3");
     expected.set("draft-a", "alpha 3");
     await app.autosave();
-    await app.menu("close_tab");
+    await app.menu("close_tab"); // closes a; b slides into its slot
     check();
     await app.menu("reopen_tab");
     check();
