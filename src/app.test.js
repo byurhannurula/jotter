@@ -205,6 +205,33 @@ describe("opening drafts", () => {
     expect(app.host.store.get("draft-b").content).toBe("bravo text");
   });
 
+  it("focuses an already-open file instead of opening it twice, and re-reads it", async () => {
+    app = await boot({
+      drafts: [
+        {
+          id: "draft-f",
+          title: "",
+          content: "first read",
+          file_path: "/notes/f.txt",
+          created_at: 1,
+          updated_at: 1,
+          pinned: false,
+          cloud: false,
+        },
+      ],
+      files: { "/notes/f.txt": "first read" },
+    });
+    await app.clickDraft("draft-f");
+    await app.menu("new"); // move away so the file's tab is not current
+    app.host.disk.set("/notes/f.txt", "edited outside");
+    await emit("open-files", ["/notes/f.txt"]); // the OS hands us the same file again
+    await settle();
+    await settle();
+    expect(app.tabIds().filter((id) => id === "draft-f")).toHaveLength(1);
+    expect(app.activeTabId()).toBe("draft-f");
+    expect(app.editor.value).toBe("edited outside");
+  });
+
   it("re-reads a file-backed draft from disk when it is opened", async () => {
     app = await boot({
       drafts: [

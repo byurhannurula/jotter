@@ -592,15 +592,13 @@ async function onFileConflict(d) {
 async function persist() {
   const d = drafts.get(currentId);
   if (!d) return;
-  // Only trust the textarea when it is actually showing this draft. Every save
-  // path reads editor.value, so a bug that moves currentId without loading the
-  // editor would otherwise write an empty string over a real note — and over
-  // its file on disk. Refusing to save is always recoverable; this is not.
-  if (editorDraftId !== currentId) {
-    console.error("persist skipped: editor is showing", editorDraftId, "not", currentId);
-    return;
-  }
-  d.content = editor.value; // pull the latest text at save time
+  // Only trust the textarea when it is actually showing this draft. A bug that
+  // moves currentId without loading the editor would otherwise write an empty
+  // string over a real note — and over its file on disk. Refusing to save is
+  // always recoverable; this is not.
+  const text = editorTextFor(currentId);
+  if (text === null) return;
+  d.content = text; // pull the latest text at save time
   if (isEmpty(d)) return; // don't write empty untouched blanks
   await saveDraft(d);
 }
@@ -858,6 +856,20 @@ function showInEditor(id, text) {
   editorDraftId = id;
 }
 
+/** The textarea's text, but only when it is showing draft `id`; null otherwise.
+ *
+ *  Every read of editor.value that flows into a draft goes through here. The
+ *  save path refusing alone was not enough: flushUi copies the textarea into
+ *  the model once per frame, and a wrong copy there would be saved as soon as
+ *  the editor showed that draft again. */
+function editorTextFor(id) {
+  if (editorDraftId !== id) {
+    console.error("editor is showing", editorDraftId, "not", id, "- text not read");
+    return null;
+  }
+  return editor.value;
+}
+
 /** Whether Escape has armed the tab-out. The rule lives in lib/keys.js. */
 let tabEscapes = false;
 
@@ -893,7 +905,9 @@ function flushUi() {
   uiRaf = 0;
   const d = drafts.get(currentId);
   if (!d) return;
-  d.content = editor.value; // read the textarea once per frame, not per event
+  const text = editorTextFor(currentId); // read the textarea once per frame, not per event
+  if (text === null) return;
+  d.content = text;
 
   const tabTitle = tabsEl.querySelector(`.tab[data-id="${CSS.escape(currentId)}"] .tab-title`);
   if (tabTitle) tabTitle.textContent = draftTitle(d);
@@ -947,13 +961,13 @@ async function openPathInTab(path) {
   // now-redundant scratch tab so we don't leave a blank "Untitled" beside it.
   const existing = [...drafts.values()].find((d) => d.file_path === path);
   if (existing) {
-    if (existing.id !== scratchId) dropScratch(scratchId);
-    runTabEffects(applyTabs(tabModel.openInTab(tabState(), tabDeps, existing.id)));
-    showInEditor(existing.id, existing.content);
-    renderTabs();
+    // A scratch draft never has a file, so it can never be `existing` itself.
+    dropScratch(scratchId);
+    // Through activate(), like every other way of becoming current: it owns
+    // currentId, re-reads the file from disk, and loads the editor.
+    await openInTab(existing.id);
+    renderTabs(); // the dropped scratch tab, if any, has to leave the bar
     renderList();
-    updateWindowTitle();
-    focusEnd();
     return;
   }
 
@@ -2445,7 +2459,7 @@ ${body}
 async function exportDraft(id) {
   const d = drafts.get(id);
   if (!d) return;
-  const content = id === currentId ? editor.value : d.content;
+  const content = (id === currentId ? editorTextFor(id) : null) ?? d.content;
   const stem =
     (d.file_path ? baseName(d.file_path).replace(/\.[^.]+$/, "") : draftTitle(d)) || "Untitled";
   const path = await saveDialog({
@@ -3155,9 +3169,10 @@ async function init() {
 
   window.addEventListener("beforeunload", () => {
     const d = drafts.get(currentId);
-    if (d && !isEmpty(d)) {
-      d.content = editor.value;
-      invoke("save_draft", { draft: d });
+    const text = d ? editorTextFor(currentId) : null;
+    if (d && text !== null) {
+      d.content = text;
+      if (!isEmpty(d)) invoke("save_draft", { draft: d });
     }
     if (cloudConfigured) invoke("sync_now").catch(() => {}); // best-effort final sync
   });
