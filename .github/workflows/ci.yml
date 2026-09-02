@@ -25,5 +25,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Formatting is enforced by a pre-commit hook, but a hook can be skipped
+      # and a PR can come from anywhere, so the gate is repeated here.
+      - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
