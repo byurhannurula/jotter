@@ -1,134 +1,19 @@
 // @vitest-environment happy-dom
 //
-// Boots the real main.js against a fake Rust host and drives it the way a user
-// does: sidebar clicks, menu events, typing. The pure modules under lib/ have
-// their own tests; this file covers the wiring between them and the DOM, which
-// is where the "open a draft, editor stays blank, autosave writes the blank
-// over the note" incident lived.
+// Scripted sessions against the real main.js. The boot harness (fake Rust host,
+// click/menu/type helpers) lives in app-harness.js and is shared with the
+// random-session test. The pure modules under lib/ have their own tests; this
+// file covers the wiring between them and the DOM, which is where the "open a
+// draft, editor stays blank, autosave writes the blank over the note" incident
+// lived.
 //
 // The one rule every test here asserts: the editor shows the text of the draft
 // whose tab is active, and nothing else is ever written to the store.
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { mockIPC, mockWindows, clearMocks } from "@tauri-apps/api/mocks";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { clearMocks } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-
-// import.meta.url is not a file: URL under happy-dom, so resolve from the
-// project root, which is where vitest runs.
-const html = readFileSync(resolve(process.cwd(), "src/index.html"), "utf8");
-const bodyHtml = html.slice(html.indexOf("<body"), html.indexOf("</body>"));
-const bodyInner = bodyHtml.slice(bodyHtml.indexOf(">") + 1);
-
-const AUTOSAVE_MS = 400;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
-
-/** In-memory stand-in for the Rust drafts store plus the few plugin commands
- *  init() touches. Records every save so a test can assert what hit disk. */
-function fakeHost({ drafts = [], files = {} } = {}) {
-  const store = new Map(drafts.map((d) => [d.id, { ...d }]));
-  const disk = new Map(Object.entries(files));
-  const mtimes = new Map([...disk.keys()].map((p) => [p, 1000]));
-  const saves = [];
-
-  const handlers = {
-    init_store: () => [...store.values()].map((d) => ({ ...d })),
-    list_drafts: () => [...store.values()].map((d) => ({ ...d })),
-    save_draft: ({ draft }) => {
-      saves.push({ id: draft.id, content: draft.content, file_path: draft.file_path });
-      store.set(draft.id, { ...draft });
-      if (draft.file_path) {
-        disk.set(draft.file_path, draft.content);
-        mtimes.set(draft.file_path, (mtimes.get(draft.file_path) ?? 1000) + 1);
-        return mtimes.get(draft.file_path);
-      }
-      return null;
-    },
-    delete_draft: ({ id }) => {
-      store.delete(id);
-    },
-    read_text_file: ({ path }) => {
-      if (!disk.has(path)) throw new Error(`no such file: ${path}`);
-      return [disk.get(path), mtimes.get(path) ?? null];
-    },
-    canonical_path: ({ path }) => path,
-    take_opened_files: () => [],
-    get_sync_config: () => ({ enabled: false, url: "", has_token: false }),
-    synced_ids: () => [],
-    refresh_shares: () => ({}),
-    sync_now: () => undefined,
-    get_drafts_dir: () => ["/Users/test/Library/Application Support/jotter/drafts", true, true],
-    "plugin:path|resolve_directory": () => "/Users/test/",
-    "plugin:updater|check": () => ({ available: false }),
-  };
-
-  mockWindows("main");
-  mockIPC((cmd, args) => (cmd in handlers ? handlers[cmd](args ?? {}) : undefined), {
-    shouldMockEvents: true,
-  });
-
-  return { store, disk, saves };
-}
-
-/** Load a fresh main.js and run its init() against a fresh body. */
-async function boot(hostOptions) {
-  const host = fakeHost(hostOptions);
-  document.body.innerHTML = bodyInner;
-  document.body.className = "sidebar-hidden";
-  localStorage.clear();
-
-  // main.js registers init on DOMContentLoaded. Capture it instead of letting
-  // it attach, so an earlier test's instance is never re-run on this DOM.
-  const realAdd = window.addEventListener.bind(window);
-  let init = null;
-  window.addEventListener = (type, fn, ...rest) => {
-    if (type === "DOMContentLoaded") init = fn;
-    else realAdd(type, fn, ...rest);
-  };
-  vi.resetModules();
-  await import("./main.js");
-  window.addEventListener = realAdd;
-  await init();
-  await nextFrame();
-
-  const editor = document.getElementById("editor");
-  const app = {
-    host,
-    editor,
-    activeTabId: () => document.querySelector("#tabs .tab.active")?.dataset.id ?? null,
-    tabIds: () => [...document.querySelectorAll("#tabs .tab")].map((t) => t.dataset.id),
-    sidebarIds: () =>
-      [...document.querySelectorAll("#draft-list .draft-item")].map((li) => li.dataset.id),
-    async clickDraft(id) {
-      const li = document.querySelector(`#draft-list .draft-item[data-id="${id}"]`);
-      if (!li) throw new Error(`draft ${id} is not in the sidebar`);
-      li.click();
-      await settle();
-    },
-    async menu(id) {
-      await emit("menu", id);
-      await settle();
-    },
-    async type(text) {
-      editor.value = text;
-      editor.dispatchEvent(new Event("input", { bubbles: true }));
-      await nextFrame();
-    },
-    async autosave() {
-      await sleep(AUTOSAVE_MS + 60);
-    },
-  };
-  return app;
-}
-
-/** Let the async chain behind a click or menu event finish. */
-async function settle() {
-  for (let i = 0; i < 6; i += 1) await Promise.resolve();
-  await nextFrame();
-  await sleep(0);
-}
+import { boot, settle } from "./app-harness.js";
 
 const seed = () => ({
   drafts: [
@@ -293,6 +178,44 @@ describe("typing and saving", () => {
     const created = ids.find((id) => !["draft-a", "draft-b"].includes(id));
     expect(app.host.store.get(created).content).toBe("charlie text");
     expect(app.host.store.get("draft-a").content).toBe("alpha text");
+  });
+});
+
+describe("deleting", () => {
+  beforeEach(async () => {
+    app = await boot(seed());
+  });
+
+  it("undo after deleting a just-typed note puts it in the store, not only on screen", async () => {
+    // Found by the random-session test: typed, deleted before autosave, undone.
+    await app.type("typed moments ago");
+    const id = app.activeTabId();
+    await app.contextMenu(id, "Delete");
+    expect(app.sidebarIds()).not.toContain(id);
+    expect(await app.clickToast("Undo")).toBe(true);
+    expect(app.sidebarIds()).toContain(id);
+    expect(app.host.store.get(id)?.content).toBe("typed moments ago");
+  });
+
+  it("two deletes then two undos bring both drafts back", async () => {
+    await app.clickDraft("draft-a");
+    await app.contextMenu("draft-a", "Delete");
+    await app.clickDraft("draft-b");
+    await app.contextMenu("draft-b", "Delete");
+    expect(app.sidebarIds()).toEqual([]);
+    expect(await app.clickToast("Undo")).toBe(true); // newest first: b
+    expect(app.sidebarIds()).toEqual(["draft-b"]);
+    expect(await app.clickToast("Undo")).toBe(true); // then a
+    expect([...app.sidebarIds()].sort()).toEqual(["draft-a", "draft-b"]);
+    expect(await app.clickToast("Undo")).toBe(false); // nothing left to undo
+  });
+
+  it("delete then wait removes the draft from the store", async () => {
+    await app.clickDraft("draft-a");
+    await app.contextMenu("draft-a", "Delete");
+    expect(app.sidebarIds()).toEqual(["draft-b"]);
+    expect(app.editor.value).toBe("");
+    expect(app.host.store.has("draft-a")).toBe(true); // still there during the undo window
   });
 });
 

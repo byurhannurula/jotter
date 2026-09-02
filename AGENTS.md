@@ -43,10 +43,18 @@ Keep both green before committing. Three layers:
   as state transitions), `keys.js` (what a keypress means), `sync-reconcile.js`,
   `sync-ui.js`. New logic goes here first.
 - **App wiring** in `src/app.test.js` (happy-dom): boots the real `main.js` against
-  a fake Rust host built on `@tauri-apps/api/mocks`, then drives it through sidebar
-  clicks, menu events and typing. Asserts the editor always shows the active tab's
-  text and nothing is ever written over a note. Add a case here for any change to
-  how tabs, drafts and the editor connect.
+  a fake Rust host built on `@tauri-apps/api/mocks` (`src/app-harness.js`), then
+  drives it through sidebar clicks, menu events, context menus, toasts and typing.
+  Asserts the editor always shows the active tab's text and nothing is ever written
+  over a note. Add a case here for any change to how tabs, drafts and the editor
+  connect. Never dispatch keyboard events on `document` from these tests; earlier
+  module instances keep their listeners.
+- **Random sessions** in `src/app.random.test.js` (fast-check): random sequences of
+  open, close, cycle, reopen, type, delete, undo and pauses against the real app,
+  with an oracle checked after every step. Runs 8 sessions by default;
+  `JOTTER_FUZZ_RUNS=200 pnpm test -- app.random` for a deep run. A failure is
+  shrunk to the shortest sequence; add that sequence to `app.test.js` as a scripted
+  case next to the fix.
 - **Rust** in `lib.rs` `mod tests`: store and atomic writes on a `TempDir`,
   `sync_core` against a wiremock server, path canonicalisation.
 

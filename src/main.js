@@ -814,12 +814,16 @@ async function deleteDraft(id) {
   showToast(`Deleted "${draftTitle(d)}"`, {
     actionLabel: "Undo",
     timeout: 6000,
-    onAction: () => {
+    onAction: async () => {
       const t = pendingDelete.get(id);
       if (t) clearTimeout(t);
       pendingDelete.delete(id);
-      drafts.set(id, d); // file was never removed, so the model is enough
+      drafts.set(id, d);
       renderList();
+      // The store may never have had this draft: deleted inside the autosave
+      // window, its text existed only in memory, and undo alone would leave it
+      // there until the next edit. Write it so a quit right now keeps it.
+      if (!isEmpty(d)) await saveDraft(d);
     },
   });
 }
