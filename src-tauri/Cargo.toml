@@ -31,6 +31,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 tauri-plugin-updater = "2"
 
+# Windows/Linux only: routes a "double-click a file while Jotter is running"
+# launch into the existing window (macOS handles that natively via RunEvent::Opened).
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"
+
 [dev-dependencies]
 # Integration tests drive sync_core against a mock HTTP server on a tempdir.
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

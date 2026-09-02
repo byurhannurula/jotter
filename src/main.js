@@ -20,10 +20,21 @@ import {
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
 const AUTOSAVE_DELAY = 400; // ms after last keystroke
+const TEXT_EXTS = ["txt", "md", "markdown", "text", "log"];
 const TEXT_FILTERS = [
-  { name: "Text", extensions: ["txt", "md", "markdown", "text", "log"] },
+  { name: "Text", extensions: TEXT_EXTS },
   { name: "All Files", extensions: ["*"] },
 ];
+
+/** A path worth opening as text: a known text extension, or no extension at all
+ *  (many plain-text files — LICENSE, .env-style notes — carry none). Keeps a
+ *  dropped PDF/image/binary from opening as a tab of mojibake. */
+function isTextPath(path) {
+  const base = path.split(/[\\/]/).pop() || "";
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return true; // no extension (or dotfile) — assume text
+  return TEXT_EXTS.includes(base.slice(dot + 1).toLowerCase());
+}
 
 const appWindow = getCurrentWindow();
 
@@ -711,10 +722,65 @@ async function openFile() {
   });
   if (!selected) return;
   const path = typeof selected === "string" ? selected : selected.path;
+  await openPathInTab(path);
+}
+
+/** Drop an empty, unsaved scratch draft (the blank "Untitled" every launch opens
+ *  with, or one left empty) from the open tabs and the store. No disk cleanup —
+ *  an empty draft was never persisted. No-op if `id` is falsy or non-empty. */
+function dropScratch(id) {
+  const d = id && drafts.get(id);
+  if (!d || !isEmpty(d)) return;
+  const i = openTabs.indexOf(id);
+  if (i !== -1) openTabs.splice(i, 1);
+  drafts.delete(id);
+  itemEls.delete(id);
+}
+
+/** Open a file with a known path — from the Open dialog, or from an OS request
+ *  (double-click / "Open With" / drag-drop / command line). Opening replaces the
+ *  active empty scratch tab rather than stranding it. If the file is already open
+ *  (or in the store from a past session) we focus that tab instead of duplicating. */
+async function openPathInTab(path) {
+  if (!path) return;
+  await flush(); // persist any edits on the current tab before we switch away
+
+  // The active tab is reusable when it's an empty, unsaved scratch draft.
+  const cur = drafts.get(currentId);
+  const scratchId = cur && isEmpty(cur) ? cur.id : null;
+
+  // Already open, or persisted from a past session? Focus that tab and drop the
+  // now-redundant scratch tab so we don't leave a blank "Untitled" beside it.
+  const existing = [...drafts.values()].find((d) => d.file_path === path);
+  if (existing) {
+    if (existing.id !== scratchId) dropScratch(scratchId);
+    if (!openTabs.includes(existing.id)) openTabs.push(existing.id);
+    currentId = existing.id;
+    editor.value = existing.content;
+    renderTabs();
+    renderList();
+    updateWindowTitle();
+    focusEnd();
+    return;
+  }
+
+  let content;
   try {
-    const content = await invoke("read_text_file", { path });
-    await flush();
-    const now = Date.now();
+    content = await invoke("read_text_file", { path });
+  } catch (err) {
+    console.error("open failed:", err);
+    showToast(`Can't open ${baseName(path)} — not a readable text file.`);
+    return;
+  }
+
+  const now = Date.now();
+  const scratch = scratchId && drafts.get(scratchId);
+  if (scratch) {
+    // Reuse the scratch tab in place.
+    scratch.content = content;
+    scratch.file_path = path;
+    scratch.updated_at = now;
+  } else {
     const d = {
       id: newId(),
       title: "",
@@ -727,15 +793,18 @@ async function openFile() {
     drafts.set(d.id, d);
     openTabs.push(d.id);
     currentId = d.id;
-    editor.value = content;
-    renderTabs();
-    renderList();
-    updateWindowTitle();
-    await persist();
-    focusEnd();
-  } catch (err) {
-    console.error("open failed:", err);
   }
+  editor.value = content;
+  renderTabs();
+  renderList();
+  updateWindowTitle();
+  await persist();
+  focusEnd();
+}
+
+/** Open a batch of OS-supplied paths, one tab each, in order. */
+async function openPaths(paths) {
+  for (const p of paths || []) await openPathInTab(p);
 }
 
 async function saveAs() {
@@ -2322,6 +2391,33 @@ async function init() {
       case "about":
         openSettings("about");
         break;
+    }
+  });
+
+  // Files opened from the OS: double-click an associated file, "Open With →
+  // Jotter", or a path on the command line. Register the listener first (for
+  // opens while the app is already running), then drain anything the Rust side
+  // buffered before the webview was ready (cold launch). Draining also flips the
+  // "ready" flag, so from here on opens arrive via the event, not the queue.
+  await listen("open-files", (event) => openPaths(event.payload));
+  const launchFiles = await invoke("take_opened_files").catch(() => []);
+  if (launchFiles.length) await openPaths(launchFiles);
+
+  // Drag a file from Finder/Explorer onto the window to open it. Tauri
+  // intercepts the OS-level drop (dragDropEnabled) and hands us the paths here;
+  // filter to text-ish files so a dropped image/PDF doesn't open as a tab.
+  await appWindow.onDragDropEvent((event) => {
+    if (event.payload.type !== "drop") return;
+    const dropped = event.payload.paths || [];
+    const text = dropped.filter(isTextPath);
+    if (text.length) openPaths(text);
+    const skipped = dropped.length - text.length;
+    if (skipped > 0) {
+      showToast(
+        skipped === 1
+          ? "Skipped 1 file — only text files can be opened."
+          : `Skipped ${skipped} files — only text files can be opened.`,
+      );
     }
   });
 

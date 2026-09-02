@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -816,6 +817,64 @@ async fn refresh_shares(app: AppHandle) -> Result<ShareCache, String> {
     Ok(map)
 }
 
+// --- Open with / file associations -----------------------------------------
+//
+// When the OS hands us a file (double-click a `.txt`, "Open With → Jotter", or a
+// path on the command line), the request can arrive *before* the webview is ready
+// to listen — especially on a cold launch, where macOS delivers the file through
+// `RunEvent::Opened` during startup. So we buffer paths here and let the frontend
+// drain them via `take_opened_files` once it boots. While the app is already
+// running, `deliver_opened_paths` emits `open-files` straight to the webview.
+
+/// Launch-time open queue. `ready` flips true the first time the frontend drains
+/// it; from then on later opens are emitted live instead of buffered.
+#[derive(Default)]
+struct OpenedFiles {
+    ready: bool,
+    paths: Vec<String>,
+}
+
+/// Route OS-supplied paths to the webview: filter to real files, then either emit
+/// (webview ready) or buffer (cold launch, frontend not listening yet).
+fn deliver_opened_paths(app: &AppHandle, paths: Vec<String>) {
+    let files: Vec<String> = paths.into_iter().filter(|p| Path::new(p).is_file()).collect();
+    if files.is_empty() {
+        return;
+    }
+    let state = app.state::<Mutex<OpenedFiles>>();
+    let mut opened = state.lock().unwrap();
+    if opened.ready {
+        let _ = app.emit("open-files", &files);
+    } else {
+        opened.paths.extend(files);
+    }
+}
+
+/// Drain the launch-time open queue and mark the app "ready". The frontend calls
+/// this once on boot; subsequent opens arrive via the `open-files` event.
+#[tauri::command]
+fn take_opened_files(app: AppHandle) -> Vec<String> {
+    let state = app.state::<Mutex<OpenedFiles>>();
+    let mut opened = state.lock().unwrap();
+    opened.ready = true;
+    std::mem::take(&mut opened.paths)
+}
+
+/// Pull candidate file paths out of a raw argv: skip the binary (arg 0) and any
+/// flags. `deliver_opened_paths` does the real-file filtering. Shared by the
+/// launch-time CLI scan and the single-instance forward, so both behave the same.
+#[cfg(not(target_os = "macos"))]
+fn file_paths_from_args<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
+    args.into_iter().skip(1).filter(|a| !a.starts_with('-')).collect()
+}
+
+/// File paths on this process's command line. Used for Windows/Linux
+/// launch-with-file (where `RunEvent::Opened` doesn't fire).
+#[cfg(not(target_os = "macos"))]
+fn cli_file_args() -> Vec<String> {
+    file_paths_from_args(std::env::args())
+}
+
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let about = MenuItemBuilder::with_id("about", "About Jotter").build(app)?;
     let app_menu = SubmenuBuilder::new(app, "Jotter")
@@ -1012,10 +1071,32 @@ fn save_window(win: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // `mut` is used only on Windows/Linux (single-instance plugin); on macOS the
+    // reassignment is cfg'd out, so silence the otherwise-spurious warning there.
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance must be the FIRST plugin registered — it intercepts a second
+    // launch before anything else spins up. Windows/Linux only: a second launch
+    // (e.g. double-clicking a file while Jotter is open) is routed into the running
+    // window instead of starting a new process, and its file arg is delivered
+    // through the same path as a cold-launch open. macOS handles this natively via
+    // RunEvent::Opened, so it doesn't need — or want — single-instance here.
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_focus();
+            }
+            deliver_opened_paths(app, file_paths_from_args(args));
+        }));
+    }
+
+    builder
         .manage(SyncState {
             running: AtomicBool::new(false),
         })
+        .manage(Mutex::new(OpenedFiles::default()))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -1067,7 +1148,8 @@ pub fn run() {
             synced_ids,
             create_share,
             revoke_share,
-            refresh_shares
+            refresh_shares,
+            take_opened_files
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1087,6 +1169,18 @@ pub fn run() {
                 if let Some(win) = app_handle.get_webview_window("main") {
                     save_window(&win);
                 }
+            }
+            // macOS delivers "open this file" here (double-click / "Open With"),
+            // both at launch and while running. The urls are `file://` — convert
+            // to plain paths the webview can hand to `read_text_file`.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => {
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|u| u.to_file_path().ok())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                deliver_opened_paths(app_handle, paths);
             }
             _ => {}
         });
