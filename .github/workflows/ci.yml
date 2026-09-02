@@ -1,9 +1,10 @@
 name: CI
 
-# Fast, cheap gates on every push/PR. The Rust suite is NOT run here: compiling the
-# Tauri crate is slow (and 10x-billed on macOS), so it runs at release time across
-# all three OSes in release.yml, and `pnpm release` also gates on `cargo test`
-# locally before it tags. Develop on `dev`; `main` is release/deploy-ready.
+# Fast gates on every push/PR. The Rust suite runs here on Linux only, with the
+# cargo cache: macOS is billed at 10x and Windows is slow, so those two are left
+# to release.yml, where all three OSes run everything. `pnpm release` also gates
+# on `cargo test` locally before it tags. Develop on `dev`; `main` is
+# release/deploy-ready.
 on:
   push:
     branches: [main, dev]
@@ -30,3 +31,18 @@ jobs:
       - run: pnpm format:check
       - run: pnpm test
       - run: pnpm build
+
+  rust:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
