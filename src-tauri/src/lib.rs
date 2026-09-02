@@ -101,12 +101,27 @@ fn drafts_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// The drafts folder, and whether it is the default one.
+/// The configured drafts folder, whether it is the default one, and whether it
+/// can be reached right now.
+///
+/// Deliberately reports the *configured* path rather than the one in use: when
+/// a custom folder is unavailable (an unmounted disk, say) `drafts_dir` falls
+/// back to the default so the app still runs, and showing the default here
+/// would hide the fact that new drafts are landing somewhere the user is not
+/// expecting.
 #[tauri::command]
-fn get_drafts_dir(app: AppHandle) -> Result<(String, bool), String> {
-    let current = drafts_dir(&app)?;
-    let is_default = current == default_drafts_dir(&app)?;
-    Ok((current.to_string_lossy().into_owned(), is_default))
+fn get_drafts_dir(app: AppHandle) -> Result<(String, bool, bool), String> {
+    match read_store_config(&app).dir {
+        Some(dir) => {
+            let available = fs::create_dir_all(&dir).is_ok();
+            Ok((dir, false, available))
+        }
+        None => Ok((
+            default_drafts_dir(&app)?.to_string_lossy().into_owned(),
+            true,
+            true,
+        )),
+    }
 }
 
 /// Move the drafts store to `dir` (or back to the default when `dir` is None).

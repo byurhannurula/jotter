@@ -1340,6 +1340,37 @@ body.sidebar-hidden.fullscreen .tabbar {
 
 /* A note explaining the control above it belongs to that row, so no rule
    between them. */
+/* Text for screen readers only — the info button's description lives here, so
+   the setting's own label is announced before it. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* A configured folder that can't be reached right now. */
+.settings-note.is-warning,
+.path-value.is-warning {
+  color: #d1443c;
+}
+
+html[data-theme="dark"] .settings-note.is-warning,
+html[data-theme="dark"] .path-value.is-warning {
+  color: #ff6961;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) .settings-note.is-warning,
+  html:not([data-theme="light"]) .path-value.is-warning {
+    color: #ff6961;
+  }
+}
+
 /* A circled "i" beside a setting's label; the text itself lives in .tip. */
 .info-btn {
   flex: 0 0 auto;

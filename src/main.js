@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { homeDir } from "@tauri-apps/api/path";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -716,6 +716,11 @@ function onEditorKeydown(e) {
     tabEscapes = true;
     return;
   }
+  // Modifier-only keydowns must not clear the flag: Shift arrives before the
+  // Tab it belongs to, so clearing here broke Esc-then-Shift-Tab entirely.
+  if (e.key === "Shift" || e.key === "Alt" || e.key === "Control" || e.key === "Meta") {
+    return;
+  }
   if (e.key !== "Tab" || e.metaKey || e.ctrlKey || e.altKey) {
     tabEscapes = false; // ⌃Tab (cycle tabs) is handled at the document level
     return;
@@ -888,10 +893,11 @@ function toggleSidebar() {
 const SIDEBAR_MIN = 190;
 const SIDEBAR_MAX = 420;
 
-function setSidebarWidth(px) {
+function setSidebarWidth(px, persist = true) {
   const w = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, Math.round(px)));
   document.documentElement.style.setProperty("--sidebar-w", `${w}px`);
-  localStorage.setItem("sidebar-w", String(w));
+  // A drag calls this on every pointermove; only the resting width is worth storing.
+  if (persist) localStorage.setItem("sidebar-w", String(w));
   return w;
 }
 
@@ -909,10 +915,11 @@ function initSidebarResize() {
     handle.setPointerCapture(e.pointerId);
     document.body.classList.add("resizing");
 
-    const onMove = (ev) => setSidebarWidth(ev.clientX);
+    const onMove = (ev) => setSidebarWidth(ev.clientX, false);
     const onUp = () => {
       handle.releasePointerCapture(e.pointerId);
       document.body.classList.remove("resizing");
+      setSidebarWidth(sidebarWidth()); // store the width it came to rest at
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
@@ -1316,7 +1323,16 @@ function infoButton(text) {
   btn.className = "info-btn";
   btn.type = "button";
   btn.textContent = "i";
-  btn.setAttribute("aria-label", text);
+  btn.setAttribute("aria-label", "More about this setting");
+  // The note is a description, not a name — a screen reader should announce the
+  // setting's own label first, then this.
+  const tipId = `tip-${(infoButton.n = (infoButton.n || 0) + 1)}`;
+  const desc = document.createElement("span");
+  desc.id = tipId;
+  desc.className = "sr-only";
+  desc.textContent = text;
+  btn.setAttribute("aria-describedby", tipId);
+  btn.append(desc);
   btn.addEventListener("mouseenter", () => showTip(btn, text));
   btn.addEventListener("focus", () => showTip(btn, text));
   btn.addEventListener("mouseleave", hideTip);
@@ -1403,11 +1419,23 @@ async function refreshDraftsDir() {
     homePath = "";
   }
   try {
-    const [dir, isDefault] = await invoke("get_drafts_dir");
+    const [dir, isDefault, available] = await invoke("get_drafts_dir");
     draftsDirPath = dir;
     label.textContent = shortPath(dir);
     label.title = dir;
+    label.classList.toggle("is-warning", !available);
     if (reset) reset.disabled = isDefault;
+
+    // An unreachable folder is not cosmetic: the store has quietly fallen back
+    // to the default, so anything written now lands somewhere else and will
+    // look lost when the volume comes back.
+    const warn = document.getElementById("drafts-dir-warning");
+    if (warn) {
+      warn.hidden = available;
+      warn.textContent = available
+        ? ""
+        : "This folder can't be reached, so drafts are going to the default location until it is back.";
+    }
   } catch {
     label.textContent = "Unavailable";
   }
@@ -1416,15 +1444,17 @@ async function refreshDraftsDir() {
 /** Point the store at `dir`, or back at the default when `dir` is null. */
 async function moveDraftsDir(dir) {
   try {
+    // The pending autosave would otherwise land in whichever folder the timer
+    // happens to fire against.
+    await flush();
     await invoke("set_drafts_dir", { dir });
     await refreshDraftsDir();
     // Everything on screen came from the old folder, so reload the store.
     const list = await invoke("init_store");
     drafts.clear();
     for (const d of list) drafts.set(d.id, d);
-    for (const id of openTabs) {
-      if (!drafts.has(id)) closedStack.length = 0;
-    }
+    // Reopening a closed tab can't work across a store change.
+    closedStack.length = 0;
     openTabs = openTabs.filter((id) => drafts.has(id));
     if (!openTabs.length) {
       const blank = createBlankDraft();
@@ -1475,8 +1505,15 @@ function renderStorageSection() {
   const show = document.createElement("button");
   show.className = "prompt-btn sync-btn";
   show.textContent = "Show in Finder";
-  show.addEventListener("click", () => {
-    if (draftsDirPath) revealDraft(draftsDirPath);
+  show.addEventListener("click", async () => {
+    if (!draftsDirPath) return;
+    // openPath opens the folder; revealItemInDir would select it in its parent,
+    // which is not what "show me my drafts folder" means.
+    try {
+      await openPath(draftsDirPath);
+    } catch {
+      showToast("Couldn't open the drafts folder");
+    }
   });
 
   const reset = document.createElement("button");
@@ -1489,6 +1526,12 @@ function renderStorageSection() {
   group.append(show, reset);
   actions.append(group);
   card.append(actions);
+
+  const warning = document.createElement("div");
+  warning.id = "drafts-dir-warning";
+  warning.className = "settings-note is-warning";
+  warning.hidden = true;
+  card.append(warning);
 
   const note = document.createElement("div");
   note.className = "settings-note";
@@ -2805,7 +2848,11 @@ async function init() {
         searchQuery = "";
         renderList();
         editor.focus();
-      } else if (focusMode) toggleFocusMode(false);
+      } else if (focusMode && !isEditableFocused()) {
+        // Only leave focus mode when Escape wasn't aimed at the editor — in
+        // there it arms the Esc-then-Tab exit, and shouldn't do both.
+        toggleFocusMode(false);
+      }
     }
   });
 
