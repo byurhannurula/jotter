@@ -422,6 +422,33 @@ fn clear_tombstone(app: &AppHandle, id: &str) {
     let _ = write_sync_config(app, &cfg);
 }
 
+/// Build the name for a conflicted copy: `notes.md` -> `notes (conflicted copy).md`.
+/// Pure so the naming is tested without touching a disk.
+fn conflict_copy_path(path: &Path) -> PathBuf {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+    match (stem, path.extension()) {
+        (Some(stem), Some(ext)) => {
+            path.with_file_name(format!("{stem} (conflicted copy).{}", ext.to_string_lossy()))
+        }
+        (Some(stem), None) => path.with_file_name(format!("{stem} (conflicted copy)")),
+        _ => path.with_extension("conflicted"),
+    }
+}
+
+/// Park the editor's text beside the file it could not be written to.
+///
+/// When a save is refused because the file changed underneath, the user's text
+/// exists only in the textarea. Quitting there loses it, and so does switching
+/// tabs, since that re-reads from disk. Writing it out at the moment the
+/// conflict is noticed means neither can, whatever the user does next.
+/// Returns the path written, for the message.
+#[tauri::command]
+fn write_conflict_copy(path: String, contents: String) -> Result<String, String> {
+    let target = conflict_copy_path(Path::new(&path));
+    write_atomic(&target, contents.as_bytes())?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
 /// Reveal the drafts folder in the system file manager.
 ///
 /// Goes through the plugin's Rust API rather than the webview's `openPath`:
@@ -1533,6 +1560,7 @@ pub fn run() {
             get_drafts_dir,
             set_drafts_dir,
             open_drafts_dir,
+            write_conflict_copy,
             forget_remote_copy,
             create_share,
             revoke_share,
@@ -1732,6 +1760,23 @@ mod tests {
         d.content = String::new();
         d.file_path = Some("/tmp/a.txt".into());
         assert!(!is_orphan(&d));
+    }
+
+    #[test]
+    fn conflict_copy_sits_beside_the_original() {
+        assert_eq!(
+            conflict_copy_path(Path::new("/a/b/notes.md")),
+            PathBuf::from("/a/b/notes (conflicted copy).md")
+        );
+        // No extension, and a name that is all extension.
+        assert_eq!(
+            conflict_copy_path(Path::new("/a/b/README")),
+            PathBuf::from("/a/b/README (conflicted copy)")
+        );
+        assert_eq!(
+            conflict_copy_path(Path::new("/a/b/notes.tar.gz")),
+            PathBuf::from("/a/b/notes.tar (conflicted copy).gz")
+        );
     }
 
     #[test]

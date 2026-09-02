@@ -483,7 +483,29 @@ function togglePreview() {
  * cloud until some unrelated edit pushed it. Pass `sync: false` only when the
  * caller has a reason not to.
  */
-async function saveDraft(d, { sync = true } = {}) {
+/** In-flight save per draft id, so two never overlap. */
+const saving = new Map();
+
+/** Write a draft, one save at a time per draft.
+ *
+ *  Autosave and ⌘S can both call this within a few milliseconds. Running them
+ *  concurrently meant the second read the draft's mtime before the first write
+ *  had changed it, so the user's own save came back as "changed on disk". Each
+ *  save now waits for the one before it and then reads a current mtime. */
+async function saveDraft(d, opts = {}) {
+  const prev = saving.get(d.id) ?? Promise.resolve();
+  const run = prev.then(() => writeDraft(d, opts));
+  // The chain has to survive a rejection, or every later save inherits it.
+  const guarded = run.catch(() => {});
+  saving.set(d.id, guarded);
+  guarded.then(() => {
+    // Drop the entry once nothing newer has queued up behind it.
+    if (saving.get(d.id) === guarded) saving.delete(d.id);
+  });
+  return run;
+}
+
+async function writeDraft(d, { sync = true } = {}) {
   try {
     // The command hands back the backing file's mtime so the next save can tell
     // whether anything else has written to it.
@@ -492,7 +514,7 @@ async function saveDraft(d, { sync = true } = {}) {
     return true;
   } catch (err) {
     if (String(err) === "conflict") {
-      onFileConflict(d);
+      await onFileConflict(d);
       return false;
     }
     console.error("save_draft failed:", err);
@@ -500,43 +522,71 @@ async function saveDraft(d, { sync = true } = {}) {
   }
 }
 
-/** Ids already showing a conflict prompt, so autosave doesn't stack toasts. */
-const conflicted = new Set();
+/** Draft id -> the open conflict toast's dismiss function. */
+const conflicted = new Map();
+
+/** Take down a conflict prompt that no longer applies.
+ *
+ *  Switching tabs re-reads the file from disk, so the edits the prompt was
+ *  asking about are gone by the time the user comes back — leaving "Keep mine"
+ *  to write the disk copy over itself and "Reload" to do nothing. */
+function clearConflict(id) {
+  const dismiss = conflicted.get(id);
+  if (!dismiss) return;
+  conflicted.delete(id);
+  dismiss();
+}
 
 /** Something else wrote to a draft's backing file since we last read it.
  *
- *  Neither copy is safe to throw away silently, so nothing is written until the
- *  user picks. Autosave keeps firing while they decide, hence the guard. */
-function onFileConflict(d) {
+ *  Neither copy is safe to throw away, so nothing goes to the file until the
+ *  user picks. Their text is parked beside the original first: at this point it
+ *  exists only in the textarea, and quitting or switching tabs would take it
+ *  with them. */
+async function onFileConflict(d) {
   if (conflicted.has(d.id)) return;
-  conflicted.add(d.id);
+  conflicted.set(d.id, () => {}); // claim the slot before the first await
 
-  showToast(`"${baseName(d.file_path)}" changed on disk since you opened it`, {
-    actionLabel: "Reload",
-    timeout: 0,
-    onAction: async () => {
-      conflicted.delete(d.id);
-      try {
-        const [text, mtime] = await invoke("read_text_file", { path: d.file_path });
-        d.content = text;
-        d.file_mtime = mtime;
-        if (d.id === currentId) {
-          showInEditor(d.id, text);
-          queueStatus();
+  let copy = null;
+  try {
+    copy = await invoke("write_conflict_copy", { path: d.file_path, contents: d.content });
+  } catch (err) {
+    console.error("could not park the conflicting text:", err);
+  }
+
+  const name = baseName(d.file_path);
+  const dismiss = showToast(
+    copy
+      ? `"${name}" changed on disk. Your version is saved as "${baseName(copy)}"`
+      : `"${name}" changed on disk since you opened it`,
+    {
+      timeout: 0,
+      actionLabel: "Reload",
+      onAction: async () => {
+        conflicted.delete(d.id);
+        try {
+          const [text, mtime] = await invoke("read_text_file", { path: d.file_path });
+          d.content = text;
+          d.file_mtime = mtime;
+          if (d.id === currentId) {
+            showInEditor(d.id, text);
+            queueStatus();
+          }
+          renderAll();
+        } catch {
+          showToast("Couldn't read the file back");
         }
-        renderAll();
-      } catch {
-        showToast("Couldn't read the file back");
-      }
+      },
+      secondaryLabel: "Keep mine",
+      onSecondary: async () => {
+        conflicted.delete(d.id);
+        // Dropping the recorded mtime is how a caller says "write regardless".
+        d.file_mtime = null;
+        await saveDraft(d);
+      },
     },
-    secondaryLabel: "Keep mine",
-    onSecondary: async () => {
-      conflicted.delete(d.id);
-      // Dropping the recorded mtime is how a caller says "write regardless".
-      d.file_mtime = null;
-      await saveDraft(d);
-    },
-  });
+  );
+  if (conflicted.has(d.id)) conflicted.set(d.id, dismiss);
 }
 
 async function persist() {
@@ -631,6 +681,7 @@ async function activate(id) {
       const [text, mtime] = await invoke("read_text_file", { path: d.file_path });
       d.content = text;
       d.file_mtime = mtime; // what a later save will compare against
+      clearConflict(id); // the disk copy is what is on screen now
     } catch {
       showToast(`"${draftTitle(d)}" is no longer on disk`);
       removeDraftFromView(id);
