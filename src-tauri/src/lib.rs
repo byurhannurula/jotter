@@ -98,11 +98,7 @@ struct StoreConfig {
 }
 
 fn read_store_config(app: &AppHandle) -> StoreConfig {
-    store_config_file(app)
-        .ok()
-        .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    read_json(store_config_file(app))
 }
 
 /// The drafts store. Honours a user-chosen folder — which is what makes it
@@ -185,8 +181,7 @@ fn set_drafts_dir(app: AppHandle, dir: Option<String>) -> Result<String, String>
             Some(to.to_string_lossy().into_owned())
         },
     };
-    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
-    fs::write(store_config_file(&app)?, json).map_err(|e| e.to_string())?;
+    write_json(&store_config_file(&app)?, &cfg)?;
     Ok(to.to_string_lossy().into_owned())
 }
 
@@ -254,6 +249,23 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
         return Err(e.to_string());
     }
     Ok(())
+}
+
+/// Read a JSON file into `T`, or `T::default()` when it is missing, unreadable
+/// or not valid JSON. Every config file in app_data_dir is read this way: a
+/// partial or older file still loads thanks to `#[serde(default)]` on the
+/// structs, and a corrupt one degrades to defaults rather than an error on boot.
+fn read_json<T: serde::de::DeserializeOwned + Default>(path: Result<PathBuf, String>) -> T {
+    path.ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Write `value` as pretty JSON, atomically.
+fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    write_atomic(path, json.as_bytes())
 }
 
 /// Write a draft's store entry, and its backing file when it has one.
@@ -596,6 +608,17 @@ struct SyncConfig {
     tombstones: HashMap<String, i64>,
 }
 
+impl SyncConfig {
+    /// The worker to talk to, as `(base_url, token)`, or None until both are
+    /// set. Configured means syncing: there is no separate enable flag.
+    fn endpoint(&self) -> Option<(String, &str)> {
+        if self.url.is_empty() || self.token.is_empty() {
+            return None;
+        }
+        Some((normalize_url(&self.url), &self.token))
+    }
+}
+
 /// What the settings UI is allowed to see — the token is deliberately omitted.
 #[derive(Serialize)]
 struct SyncConfigView {
@@ -621,17 +644,12 @@ fn sync_file(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn read_sync_config(app: &AppHandle) -> SyncConfig {
-    sync_file(app)
-        .ok()
-        .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str::<SyncConfig>(&s).ok())
-        .unwrap_or_default()
+    read_json(sync_file(app))
 }
 
 fn write_sync_config(app: &AppHandle, cfg: &SyncConfig) -> Result<(), String> {
     let path = sync_file(app)?;
-    let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())?;
+    write_json(&path, cfg)?;
     // Restrict to owner-only (0600) on unix — the file holds the auth token. No-op
     // on Windows, which relies on the per-user app_data_dir. Best-effort.
     #[cfg(unix)]
@@ -849,16 +867,14 @@ fn delete_wins(local_updated: i64, remote_deleted_at: i64) -> bool {
 /// ledger (re-reading so a config edit / delete mid-sync isn't clobbered).
 async fn sync_once(app: &AppHandle) -> Result<bool, String> {
     let cfg = read_sync_config(app);
-    // Configured (URL + token) == syncing. No separate enable flag.
-    if cfg.url.is_empty() || cfg.token.is_empty() {
+    let Some((base, token)) = cfg.endpoint() else {
         return Ok(false);
-    }
-    let base = normalize_url(&cfg.url);
+    };
     let dir = drafts_dir(app)?;
     let (changed, synced, pushed_deletes) = sync_core(
         &http_client(20)?,
         &base,
-        &cfg.token,
+        token,
         &dir,
         cfg.synced.clone(),
         &cfg.tombstones,
@@ -1007,8 +1023,7 @@ async fn sync_core(
 async fn sync_now(app: AppHandle) -> Result<(), String> {
     // Silent no-op when sync isn't set up, so the launch-time call emits no status
     // for users who never configured it. Configured (URL + token) == syncing.
-    let cfg = read_sync_config(&app);
-    if cfg.url.is_empty() || cfg.token.is_empty() {
+    if read_sync_config(&app).endpoint().is_none() {
         return Ok(());
     }
     let state = app.state::<SyncState>();
@@ -1078,17 +1093,11 @@ fn shares_file(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn read_shares(app: &AppHandle) -> ShareCache {
-    shares_file(app)
-        .ok()
-        .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str::<ShareCache>(&s).ok())
-        .unwrap_or_default()
+    read_json(shares_file(app))
 }
 
 fn write_shares(app: &AppHandle, cache: &ShareCache) -> Result<(), String> {
-    let path = shares_file(app)?;
-    let json = serde_json::to_string_pretty(cache).map_err(|e| e.to_string())?;
-    fs::write(path, json).map_err(|e| e.to_string())
+    write_json(&shares_file(app)?, cache)
 }
 
 fn http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
@@ -1148,11 +1157,10 @@ async fn fetch_shares(
 #[tauri::command]
 async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
     let cfg = read_sync_config(&app);
-    if cfg.url.is_empty() || cfg.token.is_empty() {
+    let Some((base, token)) = cfg.endpoint() else {
         return Err("cloud not configured".into());
-    }
+    };
     let draft = read_draft(&app, &id).ok_or_else(|| "draft not found".to_string())?;
-    let base = normalize_url(&cfg.url);
 
     #[derive(Serialize)]
     struct Req<'a> {
@@ -1172,7 +1180,7 @@ async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
     }
     let resp = http_client(15)?
         .post(format!("{base}/share"))
-        .bearer_auth(&cfg.token)
+        .bearer_auth(token)
         .json(&Req {
             draft_id: &id,
             title: &draft.title,
@@ -1201,24 +1209,23 @@ async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
 #[tauri::command]
 async fn revoke_share(app: AppHandle, id: String) -> Result<(), String> {
     let cfg = read_sync_config(&app);
-    if cfg.url.is_empty() || cfg.token.is_empty() {
+    let Some((base, token)) = cfg.endpoint() else {
         return Err("cloud not configured".into());
-    }
-    let base = normalize_url(&cfg.url);
+    };
     let client = http_client(15)?;
     let mut cache = read_shares(&app);
 
     // Resolve the share id from the cache, else ask the worker.
     let share_id = match cache.get(&id) {
         Some(info) => info.share_id.clone(),
-        None => match fetch_shares(&client, &base, &cfg.token).await?.get(&id) {
+        None => match fetch_shares(&client, &base, token).await?.get(&id) {
             Some(info) => info.share_id.clone(),
             None => return Ok(()), // nothing to revoke
         },
     };
     let resp = client
         .delete(format!("{base}/share/{share_id}"))
-        .bearer_auth(&cfg.token)
+        .bearer_auth(token)
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -1237,11 +1244,10 @@ async fn revoke_share(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 async fn refresh_shares(app: AppHandle) -> Result<ShareCache, String> {
     let cfg = read_sync_config(&app);
-    if cfg.url.is_empty() || cfg.token.is_empty() {
+    let Some((base, token)) = cfg.endpoint() else {
         return Ok(ShareCache::new());
-    }
-    let base = normalize_url(&cfg.url);
-    let map = fetch_shares(&http_client(15)?, &base, &cfg.token).await?;
+    };
+    let map = fetch_shares(&http_client(15)?, &base, token).await?;
     write_shares(&app, &map)?;
     Ok(map)
 }
@@ -1521,10 +1527,7 @@ fn restore_window(app: &AppHandle) {
     };
 
     // Saved size, else a comfortable fraction of the monitor.
-    let saved = geom_file(app)
-        .ok()
-        .and_then(|p| fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str::<WindowGeom>(&s).ok());
+    let saved: Option<WindowGeom> = read_json(geom_file(app));
     let (mut w, mut h) = match saved {
         Some(g) => (g.w, g.h),
         None => (
@@ -1550,8 +1553,8 @@ fn save_window(win: &tauri::WebviewWindow) {
             w: size.width as f64 / scale,
             h: size.height as f64 / scale,
         };
-        if let (Ok(path), Ok(json)) = (geom_file(win.app_handle()), serde_json::to_string(&geom)) {
-            let _ = fs::write(path, json);
+        if let Ok(path) = geom_file(win.app_handle()) {
+            let _ = write_json(&path, &geom);
         }
     }
 }
@@ -2076,6 +2079,40 @@ mod tests {
         assert!(!is_safe_worker_url("http://localhost.evil.example"));
         assert!(!is_safe_worker_url("ftp://x.example"));
         assert!(!is_safe_worker_url("jotter.example.com"));
+    }
+
+    #[test]
+    fn endpoint_needs_both_url_and_token_and_normalizes_the_url() {
+        let mut cfg = SyncConfig::default();
+        assert!(cfg.endpoint().is_none());
+        cfg.url = "https://x.example/".into();
+        assert!(cfg.endpoint().is_none());
+        cfg.token = "tok".into();
+        assert_eq!(
+            cfg.endpoint(),
+            Some(("https://x.example".to_string(), "tok"))
+        );
+    }
+
+    #[test]
+    fn read_json_degrades_to_defaults_and_round_trips() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("cfg.json");
+        let missing: SyncConfig = read_json(Ok(path.clone()));
+        assert!(missing.url.is_empty());
+
+        fs::write(&path, "{ not json").unwrap();
+        let corrupt: SyncConfig = read_json(Ok(path.clone()));
+        assert!(corrupt.url.is_empty());
+
+        let mut cfg = SyncConfig::default();
+        cfg.url = "https://x.example".into();
+        write_json(&path, &cfg).unwrap();
+        let back: SyncConfig = read_json(Ok(path.clone()));
+        assert_eq!(back.url, "https://x.example");
+
+        let unreadable: SyncConfig = read_json(Err("no dir".into()));
+        assert!(unreadable.url.is_empty());
     }
 
     #[test]
