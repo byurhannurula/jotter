@@ -1023,7 +1023,10 @@ async function saveAs() {
     filters: TEXT_FILTERS,
   });
   if (!path) return;
-  d.file_path = path;
+  // Same spelling as an open of this file will produce later, or it would
+  // come back as a second tab. The Rust side resolves the folder and keeps
+  // the name when the file does not exist yet.
+  d.file_path = await invoke("canonical_path", { path }).catch(() => path);
   d.updated_at = Date.now();
   renderAll();
   await flush();

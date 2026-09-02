@@ -263,9 +263,15 @@ fn write_draft_in(dir: &Path, draft: &Draft) -> Result<(), String> {
         write_atomic(Path::new(fp), d.content.as_bytes())?;
         d.file_mtime = mtime_ms(fp);
     }
-    let json = serde_json::to_string_pretty(&d).map_err(|e| e.to_string())?;
-    write_atomic(&draft_path(dir, &d.id), json.as_bytes())?;
-    Ok(())
+    write_entry_in(dir, &d)
+}
+
+/// Write only the store entry, leaving the backing text file alone. For fixes
+/// to the entry itself (a path spelled differently), where writing the file
+/// would risk putting stale content over a newer copy on disk.
+fn write_entry_in(dir: &Path, draft: &Draft) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
+    write_atomic(&draft_path(dir, &draft.id), json.as_bytes())
 }
 
 fn draft_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
@@ -294,6 +300,21 @@ fn write_draft(app: &AppHandle, draft: &Draft) -> Result<(), String> {
 #[tauri::command]
 fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
     let mut drafts = read_all_drafts(&app)?;
+
+    // Paths stored before opens were canonicalised may be spelled differently
+    // from what an open produces now (`/tmp` vs `/private/tmp`, a symlinked
+    // folder), which would open the same file in a second tab. Fix the entry
+    // once; the text file is not touched.
+    let dir = drafts_dir(&app)?;
+    for d in drafts.iter_mut() {
+        if let Some(fp) = &d.file_path {
+            let fixed = canonical(fp);
+            if fixed != *fp {
+                d.file_path = Some(fixed);
+                let _ = write_entry_in(&dir, d);
+            }
+        }
+    }
 
     // Prune empty, unnamed orphans (delete them), and hide drafts whose backing
     // file is gone (keep the store entry so they can come back).
@@ -475,13 +496,44 @@ fn open_drafts_dir(app: AppHandle) -> Result<(), String> {
 /// strings, and the OS hands the same file over by different names depending on
 /// how it was opened — a dialog, a drop, "Open With", the command line. Without
 /// this the same file opens in two tabs that then overwrite each other.
-/// Falls back to the input when the path cannot be resolved, so a file that has
-/// since gone still reaches the caller's own error handling.
+///
+/// A file that does not exist yet (Save As names one before the first write)
+/// gets its directory resolved and its name kept, so the stored path matches
+/// what a later open of that file will produce. A path that cannot be resolved
+/// at all is returned unchanged, so a file that has since gone still reaches
+/// the caller's own error handling.
+fn canonical(path: &str) -> String {
+    let p = Path::new(path);
+    let resolved = match fs::canonicalize(p) {
+        Ok(r) => r,
+        Err(_) => match (p.parent(), p.file_name()) {
+            (Some(dir), Some(name)) if !dir.as_os_str().is_empty() => match fs::canonicalize(dir) {
+                Ok(d) => d.join(name),
+                Err(_) => return path.to_string(),
+            },
+            _ => return path.to_string(),
+        },
+    };
+    strip_verbatim(resolved.to_string_lossy().into_owned())
+}
+
+/// Undo the `\\?\` verbatim prefix Windows' `canonicalize` adds (`\\?\C:\...`,
+/// `\\?\UNC\server\share\...`). Nothing else in the app or in the OS dialogs
+/// uses that form, so a path carrying it would never match one that does not,
+/// and it reads as line noise in the sidebar. Pure, so it is tested on every OS.
+fn strip_verbatim(s: String) -> String {
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => match rest.strip_prefix(r"UNC\") {
+            Some(unc) => format!(r"\\{unc}"),
+            None => rest.to_string(),
+        },
+        None => s,
+    }
+}
+
 #[tauri::command]
 fn canonical_path(path: String) -> String {
-    fs::canonicalize(&path)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or(path)
+    canonical(&path)
 }
 
 /// A file's contents and its modification time, so the caller can tell later
@@ -1198,7 +1250,7 @@ fn deliver_opened_paths(app: &AppHandle, paths: Vec<String>) {
     let files: Vec<String> = paths
         .into_iter()
         .filter(|p| Path::new(p).is_file())
-        .map(canonical_path)
+        .map(|p| canonical(&p))
         .collect();
     if files.is_empty() {
         return;
@@ -1803,6 +1855,70 @@ mod tests {
         d.content = String::new();
         d.file_path = Some("/tmp/a.txt".into());
         assert!(!is_orphan(&d));
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped_and_other_paths_pass_through() {
+        assert_eq!(
+            strip_verbatim(r"\\?\C:\Users\me\a.txt".into()),
+            r"C:\Users\me\a.txt"
+        );
+        assert_eq!(
+            strip_verbatim(r"\\?\UNC\srv\share\a.txt".into()),
+            r"\\srv\share\a.txt"
+        );
+        assert_eq!(strip_verbatim("/Users/me/a.txt".into()), "/Users/me/a.txt");
+        assert_eq!(strip_verbatim(r"C:\plain\a.txt".into()), r"C:\plain\a.txt");
+    }
+
+    #[test]
+    fn canonical_resolves_dots_and_keeps_the_name_of_a_file_not_yet_written() {
+        let dir = TempDir::new().unwrap();
+        let real = dir.path().join("real");
+        fs::create_dir(&real).unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+
+        // `..` in the middle, file does not exist: directory resolved, name kept.
+        let dotted = dir
+            .path()
+            .join("real")
+            .join("..")
+            .join("real")
+            .join("new.txt");
+        assert_eq!(
+            canonical(dotted.to_str().unwrap()),
+            root.join("real").join("new.txt").to_string_lossy()
+        );
+
+        // Existing file: fully resolved.
+        fs::write(real.join("a.txt"), "x").unwrap();
+        assert_eq!(
+            canonical(dotted.with_file_name("a.txt").to_str().unwrap()),
+            root.join("real").join("a.txt").to_string_lossy()
+        );
+
+        // Nothing resolvable at all: unchanged.
+        assert_eq!(
+            canonical("/no/such/dir/at/all.txt"),
+            "/no/such/dir/at/all.txt"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_follows_a_symlinked_folder_even_for_a_new_file() {
+        let dir = TempDir::new().unwrap();
+        let real = dir.path().join("real");
+        fs::create_dir(&real).unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let root = fs::canonicalize(dir.path()).unwrap();
+
+        let via_link = link.join("new.txt");
+        assert_eq!(
+            canonical(via_link.to_str().unwrap()),
+            root.join("real").join("new.txt").to_string_lossy()
+        );
     }
 
     #[test]
