@@ -1678,6 +1678,16 @@ body.tab-moves-focus .setting-row[data-setting="tabsize"] {
   border-radius: 7px;
   cursor: default;
 }
+
+/* The lesser of two answers in a question toast. */
+.toast-action.secondary {
+  opacity: 0.75;
+  font-weight: 400;
+}
+
+.toast-action.secondary:hover {
+  opacity: 1;
+}
 @keyframes toast-in {
   from {
     opacity: 0;

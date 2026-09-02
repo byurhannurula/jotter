@@ -483,13 +483,58 @@ function togglePreview() {
  */
 async function saveDraft(d, { sync = true } = {}) {
   try {
-    await invoke("save_draft", { draft: d });
+    // The command hands back the backing file's mtime so the next save can tell
+    // whether anything else has written to it.
+    d.file_mtime = await invoke("save_draft", { draft: d });
     if (sync) scheduleSync();
     return true;
   } catch (err) {
+    if (String(err) === "conflict") {
+      onFileConflict(d);
+      return false;
+    }
     console.error("save_draft failed:", err);
     return false;
   }
+}
+
+/** Ids already showing a conflict prompt, so autosave doesn't stack toasts. */
+const conflicted = new Set();
+
+/** Something else wrote to a draft's backing file since we last read it.
+ *
+ *  Neither copy is safe to throw away silently, so nothing is written until the
+ *  user picks. Autosave keeps firing while they decide, hence the guard. */
+function onFileConflict(d) {
+  if (conflicted.has(d.id)) return;
+  conflicted.add(d.id);
+
+  showToast(`"${baseName(d.file_path)}" changed on disk since you opened it`, {
+    actionLabel: "Reload",
+    timeout: 0,
+    onAction: async () => {
+      conflicted.delete(d.id);
+      try {
+        const [text, mtime] = await invoke("read_text_file", { path: d.file_path });
+        d.content = text;
+        d.file_mtime = mtime;
+        if (d.id === currentId) {
+          editor.value = text;
+          queueStatus();
+        }
+        renderAll();
+      } catch {
+        showToast("Couldn't read the file back");
+      }
+    },
+    secondaryLabel: "Keep mine",
+    onSecondary: async () => {
+      conflicted.delete(d.id);
+      // Dropping the recorded mtime is how a caller says "write regardless".
+      d.file_mtime = null;
+      await saveDraft(d);
+    },
+  });
 }
 
 async function persist() {
@@ -531,7 +576,9 @@ async function activate(id) {
   // vanished file is caught (and dropped from the sidebar) at open time.
   if (d.file_path) {
     try {
-      d.content = await invoke("read_text_file", { path: d.file_path });
+      const [text, mtime] = await invoke("read_text_file", { path: d.file_path });
+      d.content = text;
+      d.file_mtime = mtime; // what a later save will compare against
     } catch {
       showToast(`"${draftTitle(d)}" is no longer on disk`);
       removeDraftFromView(id);
@@ -834,9 +881,9 @@ async function openPathInTab(path) {
     return;
   }
 
-  let content;
+  let content, mtime;
   try {
-    content = await invoke("read_text_file", { path });
+    [content, mtime] = await invoke("read_text_file", { path });
   } catch (err) {
     console.error("open failed:", err);
     showToast(`Can't open ${baseName(path)} — not a readable text file.`);
@@ -849,6 +896,7 @@ async function openPathInTab(path) {
     // Reuse the scratch tab in place.
     scratch.content = content;
     scratch.file_path = path;
+    scratch.file_mtime = mtime;
     scratch.updated_at = now;
   } else {
     const d = {
@@ -856,6 +904,7 @@ async function openPathInTab(path) {
       title: "",
       content,
       file_path: path,
+      file_mtime: mtime,
       created_at: now,
       updated_at: now,
       pinned: false,
@@ -2077,7 +2126,15 @@ function initSettings() {
 }
 
 /** Transient bottom-center message with an optional action button. */
-function showToast(message, { actionLabel, onAction, timeout = 5000 } = {}) {
+/** Transient bottom-center message.
+ *
+ *  `timeout: 0` keeps it up until the user answers — for a question where
+ *  letting it time out would pick an answer on their behalf.
+ */
+function showToast(
+  message,
+  { actionLabel, onAction, secondaryLabel, onSecondary, timeout = 5000 } = {},
+) {
   const host = document.getElementById("toast-host");
   const toast = document.createElement("div");
   toast.className = "toast";
@@ -2091,18 +2148,20 @@ function showToast(message, { actionLabel, onAction, timeout = 5000 } = {}) {
     toast.classList.add("out");
     setTimeout(() => toast.remove(), 200);
   };
-  if (actionLabel) {
-    const act = document.createElement("button");
-    act.className = "toast-action";
-    act.textContent = actionLabel;
-    act.addEventListener("click", () => {
-      onAction?.();
+  const button = (label, handler, cls) => {
+    const b = document.createElement("button");
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      handler?.();
       dismiss();
     });
-    toast.append(act);
-  }
+    toast.append(b);
+  };
+  if (secondaryLabel) button(secondaryLabel, onSecondary, "toast-action secondary");
+  if (actionLabel) button(actionLabel, onAction, "toast-action");
   host.append(toast);
-  timer = setTimeout(dismiss, timeout);
+  if (timeout > 0) timer = setTimeout(dismiss, timeout);
   return dismiss;
 }
 

@@ -33,6 +33,21 @@ struct Draft {
     // sync. `#[serde(default)]` keeps older/remote drafts loading as opt-out.
     #[serde(default)]
     cloud: bool,
+    // Modification time of `file_path` as of the last read or write this device
+    // made, in ms. Used to notice that something else changed the file since —
+    // see `save_draft`. Device-local like `file_path`, so it is scrubbed before
+    // a push.
+    #[serde(default)]
+    file_mtime: Option<i64>,
+}
+
+/// A file's modification time in ms, or None if it cannot be read.
+fn mtime_ms(path: &str) -> Option<i64> {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
 }
 
 fn now_ms() -> i64 {
@@ -299,6 +314,7 @@ fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
                     updated_at: now,
                     pinned: false,
                     cloud: false,
+                    file_mtime: None,
                 };
                 write_draft(&app, &draft)?;
                 drafts.push(draft);
@@ -310,12 +326,40 @@ fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
     Ok(drafts)
 }
 
+/// Whether a save must be refused because the backing file moved on underneath.
+///
+/// Only a mismatch between two known times counts. No recorded time means the
+/// caller has said "write regardless"; an unreadable current time means the
+/// file is gone or unreachable, and refusing there would strand the user's text
+/// with nowhere to put it.
+fn is_conflict(seen: Option<i64>, current: Option<i64>) -> bool {
+    matches!((seen, current), (Some(s), Some(c)) if s != c)
+}
+
+/// Sentinel the frontend matches on to offer reload-or-keep.
+const CONFLICT: &str = "conflict";
+
 /// Upsert a draft: write its store file and (if named) the on-disk text file.
+///
+/// Refuses to write when the backing file changed underneath us — the draft
+/// carries the mtime it last saw, and anything else means another program (an
+/// editor, a sync client) has written since. Autosave fires 400 ms after a
+/// keystroke, so without this the app would silently overwrite that work. A
+/// draft with no recorded mtime is written unconditionally, which is how the
+/// frontend says "keep mine".
+///
+/// Returns the file's mtime after the write, for the caller to hold on to.
 #[tauri::command]
-fn save_draft(app: AppHandle, draft: Draft) -> Result<(), String> {
+fn save_draft(app: AppHandle, mut draft: Draft) -> Result<Option<i64>, String> {
+    if let Some(path) = draft.file_path.as_deref() {
+        if is_conflict(draft.file_mtime, mtime_ms(path)) {
+            return Err(CONFLICT.to_string());
+        }
+    }
     write_draft(&app, &draft)?;
     clear_tombstone(&app, &draft.id); // a re-saved draft is no longer deleted
-    Ok(())
+    draft.file_mtime = draft.file_path.as_deref().and_then(mtime_ms);
+    Ok(draft.file_mtime)
 }
 
 #[tauri::command]
@@ -350,16 +394,19 @@ fn clear_tombstone(app: &AppHandle, id: &str) {
     let _ = write_sync_config(app, &cfg);
 }
 
+/// A file's contents and its modification time, so the caller can tell later
+/// whether anything else has written to it.
 #[tauri::command]
-fn read_text_file(path: String) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| e.to_string())
+fn read_text_file(path: String) -> Result<(String, Option<i64>), String> {
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    Ok((text, mtime_ms(&path)))
 }
 
 /// Write text to an arbitrary path the user picked (used by Export). Unlike
 /// `save_draft`, this doesn't touch the draft's own file_path.
 #[tauri::command]
 fn write_text_file(path: String, contents: String) -> Result<(), String> {
-    fs::write(path, contents).map_err(|e| e.to_string())
+    write_atomic(Path::new(&path), contents.as_bytes())
 }
 
 // --- Cloud sync config (opt-in, self-hosted) --------------------------------
@@ -709,6 +756,7 @@ async fn sync_core(
         if needs_push(d.updated_at, synced.get(id).copied()) {
             let mut up = d.clone();
             up.file_path = None; // device-local; never leaves the machine
+            up.file_mtime = None; // ditto — it describes this machine's copy
             let body = serde_json::to_string(&up).map_err(|e| e.to_string())?;
             let resp = client
                 .put(format!("{base}/drafts/{id}"))
@@ -1531,6 +1579,59 @@ mod tests {
         assert!(needs_push(10, Some(5))); // edited since last sync -> push
         assert!(!needs_push(10, Some(10))); // already in sync -> skip
         assert!(!needs_push(5, Some(10))); // remote ahead -> skip (pull handles it)
+    }
+
+    #[test]
+    fn conflict_only_when_two_known_times_differ() {
+        assert!(is_conflict(Some(1), Some(2)));
+        assert!(!is_conflict(Some(1), Some(1)));
+        // "keep mine": the frontend drops the recorded time to force a write.
+        assert!(!is_conflict(None, Some(2)));
+        // The file is gone or unreadable — refusing would strand the text.
+        assert!(!is_conflict(Some(1), None));
+        assert!(!is_conflict(None, None));
+    }
+
+    #[test]
+    fn write_atomic_replaces_contents_and_leaves_no_temp_file() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("note.txt");
+
+        write_atomic(&target, b"first").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "first");
+
+        write_atomic(&target, b"second").unwrap();
+        assert_eq!(fs::read_to_string(&target).unwrap(), "second");
+
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "note.txt")
+            .collect();
+        assert!(leftovers.is_empty(), "left behind: {leftovers:?}");
+    }
+
+    #[test]
+    fn write_atomic_reports_a_missing_directory_rather_than_panicking() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("no-such-dir").join("note.txt");
+        assert!(write_atomic(&target, b"x").is_err());
+    }
+
+    #[test]
+    fn mtime_is_none_for_a_path_that_is_not_there() {
+        let dir = TempDir::new().unwrap();
+        let missing = dir.path().join("nope.txt");
+        assert_eq!(mtime_ms(missing.to_str().unwrap()), None);
+    }
+
+    #[test]
+    fn mtime_is_read_back_after_a_write() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("note.txt");
+        write_atomic(&target, b"hello").unwrap();
+        assert!(mtime_ms(target.to_str().unwrap()).is_some());
     }
 
     #[test]
