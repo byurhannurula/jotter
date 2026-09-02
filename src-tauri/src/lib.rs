@@ -482,6 +482,27 @@ fn normalize_url(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
 }
 
+/// Whether a worker URL is safe to send the sync token to.
+///
+/// Every request carries the token as a bearer header, so plain http would put
+/// it on the wire in cleartext for anything on the path to read. localhost is
+/// allowed because it never leaves the machine, which keeps a self-hosted
+/// worker testable with `wrangler dev`.
+fn is_safe_worker_url(url: &str) -> bool {
+    let u = normalize_url(url);
+    if u.is_empty() {
+        return true; // nothing configured yet
+    }
+    if u.starts_with("https://") {
+        return true;
+    }
+    let Some(rest) = u.strip_prefix("http://") else {
+        return false; // no scheme, or something that is not http(s)
+    };
+    let host = rest.split(['/', ':']).next().unwrap_or("");
+    matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
+}
+
 /// Merge a config update onto an existing config, preserving the sync ledger and
 /// the stored token when no new token is supplied. Pure, so it's unit-tested.
 fn apply_config_update(
@@ -509,6 +530,12 @@ fn set_sync_config(
     url: String,
     token: Option<String>,
 ) -> Result<(), String> {
+    if !is_safe_worker_url(&url) {
+        return Err(
+            "The worker URL must start with https:// — every request carries your              sync token, and plain http would send it in the clear."
+                .into(),
+        );
+    }
     let cfg = apply_config_update(read_sync_config(&app), enabled, url, token);
     write_sync_config(&app, &cfg)
 }
@@ -1641,6 +1668,22 @@ mod tests {
         let mut opted_in = draft("note", Some("/tmp/a.txt"));
         opted_in.cloud = true;
         assert!(syncs_to_cloud(&opted_in)); // explicit opt-in -> syncs
+    }
+
+    #[test]
+    fn only_https_or_localhost_may_receive_the_token() {
+        assert!(is_safe_worker_url("https://jotter.example.workers.dev"));
+        assert!(is_safe_worker_url("  https://x.example/  "));
+        assert!(is_safe_worker_url("")); // not configured yet
+        assert!(is_safe_worker_url("http://localhost:8787"));
+        assert!(is_safe_worker_url("http://127.0.0.1:8787/"));
+
+        assert!(!is_safe_worker_url("http://jotter.example.com"));
+        assert!(!is_safe_worker_url("http://192.168.1.10:8787"));
+        // A host merely starting with "localhost" is a different host.
+        assert!(!is_safe_worker_url("http://localhost.evil.example"));
+        assert!(!is_safe_worker_url("ftp://x.example"));
+        assert!(!is_safe_worker_url("jotter.example.com"));
     }
 
     #[test]
