@@ -2533,9 +2533,9 @@ function openDraftMenu(e, id) {
     // specific one into cloud sync. In-app drafts always sync, so no entry there.
     if (hasFile) {
       if (d.cloud) {
-        items.push({ label: "Stop Syncing to Cloud", action: () => stopSyncingFile(id) });
+        items.push({ label: "Stop Syncing to Cloud", action: () => setFileCloud(id, false) });
       } else {
-        items.push({ label: "Sync to Cloud", action: () => syncFileToCloud(id) });
+        items.push({ label: "Sync to Cloud", action: () => setFileCloud(id, true) });
       }
     }
     if (sharedById.has(id)) {
@@ -2560,44 +2560,27 @@ function openDraftMenu(e, id) {
   showContextMenu(e.clientX, e.clientY, items);
 }
 
-// Opt a file-backed draft into cloud sync. Not one-way: once a file draft syncs
-// it is treated like any other, so a newer copy arriving from another device
-// overwrites the file on disk. `cloud` is a Draft field, so the choice travels
-// with the draft and survives a restart.
-async function syncFileToCloud(id) {
+// Opt a file-backed draft into or out of cloud sync. Not one-way: once a file
+// draft syncs it is treated like any other, so a newer copy arriving from
+// another device overwrites the file on disk. `cloud` is a Draft field, so the
+// choice travels with the draft and survives a restart.
+//
+// Opting out also takes the copy already on the worker with it — turning the
+// flag off alone would leave the note sitting up there, which is not what
+// someone who just changed their mind about uploading it means. The Rust
+// command flips the flag and settles the tombstone in one step.
+async function setFileCloud(id, on) {
   const d = drafts.get(id);
-  if (!d || !d.file_path) return;
-  d.cloud = true;
-  if (await saveDraft(d)) {
-    showToast("Syncing this file to the cloud");
-  } else {
-    d.cloud = false; // roll back so the menu still offers it
-    showToast("Couldn't enable sync for this file");
-  }
-}
-
-/** Opt a file draft back out, and take the copy already in the cloud with it.
- *
- *  Turning the flag off alone would leave the note sitting on the worker, which
- *  is not what someone who just changed their mind about uploading it means. The
- *  save has to come first: it clears any stale tombstone, and the new one is
- *  what the next sync acts on. */
-async function stopSyncingFile(id) {
-  const d = drafts.get(id);
-  if (!d || !d.cloud) return;
-  d.cloud = false;
-  if (!(await saveDraft(d, { sync: false }))) {
-    d.cloud = true;
-    showToast("Couldn't stop syncing this file");
-    return;
-  }
+  if (!d || !d.file_path || d.cloud === on) return;
+  d.cloud = on; // the next autosave carries the same value
   try {
-    await invoke("forget_remote_copy", { id });
+    await invoke("set_cloud", { id, on });
     scheduleSync();
-    showToast("Stopped syncing — removing the cloud copy");
+    showToast(on ? "Syncing this file to the cloud" : "Stopped syncing — removing the cloud copy");
   } catch (err) {
-    console.error("forget_remote_copy failed:", err);
-    showToast("Stopped syncing, but the cloud copy may remain");
+    console.error("set_cloud failed:", err);
+    d.cloud = !on; // roll back so the menu offers the same choice again
+    showToast(on ? "Couldn't enable sync for this file" : "Couldn't stop syncing this file");
   }
 }
 

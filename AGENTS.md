@@ -80,7 +80,7 @@ push. Release runs Rust on all three OSes.
 - Drafts-store commands: `init_store`, `save_draft`, `delete_draft`, `read_text_file`,
   `write_text_file`, `canonical_path`, `write_conflict_copy`, `get_drafts_dir`,
   `set_drafts_dir`, `open_drafts_dir`. Sync: `sync_now`, `list_drafts`,
-  `synced_ids`, `forget_remote_copy`, the `*_sync_config` pair, and the share
+  `synced_ids`, `set_cloud`, the `*_sync_config` pair, and the share
   commands. Open-with: `take_opened_files` drains files buffered before the webview
   was ready; later opens arrive as the `open-files` event.
 - Native menu built once in `build_menu`; menu clicks `emit("menu", <id>)` to the

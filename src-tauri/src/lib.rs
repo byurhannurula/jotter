@@ -410,12 +410,30 @@ fn save_draft(app: AppHandle, draft: Draft) -> Result<Option<i64>, String> {
     Ok(mtime)
 }
 
-/// Ask the next sync to remove this draft's copy from the cloud while keeping it
-/// locally. Used when a file draft is opted back out of sync: the note has
-/// already left the machine, so turning the flag off is not enough on its own.
+/// Flip a stored draft's `cloud` flag, entry only. The text file is not
+/// touched: this is a change to what the store knows, not to the note.
+fn set_cloud_in(dir: &Path, id: &str, on: bool) -> Result<Draft, String> {
+    let path = draft_path(dir, id);
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut d: Draft = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    d.cloud = on;
+    write_entry_in(dir, &d)?;
+    Ok(d)
+}
+
+/// Opt a file-backed draft into or out of cloud sync, and settle its tombstone
+/// in the same step: opting out records one so the next sync removes the copy
+/// already on the worker (turning the flag off alone would leave the note up
+/// there), and opting in clears any that is pending. One command, so a failure
+/// cannot leave the flag and the tombstone disagreeing.
 #[tauri::command]
-fn forget_remote_copy(app: AppHandle, id: String) -> Result<(), String> {
-    record_tombstone(&app, &id);
+fn set_cloud(app: AppHandle, id: String, on: bool) -> Result<(), String> {
+    set_cloud_in(&drafts_dir(&app)?, &id, on)?;
+    if on {
+        clear_tombstone(&app, &id);
+    } else {
+        record_tombstone(&app, &id);
+    }
     Ok(())
 }
 
@@ -1634,7 +1652,7 @@ pub fn run() {
             set_drafts_dir,
             open_drafts_dir,
             write_conflict_copy,
-            forget_remote_copy,
+            set_cloud,
             create_share,
             revoke_share,
             refresh_shares,
@@ -1920,6 +1938,31 @@ mod tests {
             canonical(via_link.to_str().unwrap()),
             root.join("real").join("new.txt").to_string_lossy()
         );
+    }
+
+    #[test]
+    fn set_cloud_flips_the_entry_and_leaves_the_text_file_alone() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("note.txt");
+        fs::write(&file, "on disk, newer than the store").unwrap();
+        let mut d = draft("stale store copy", Some(file.to_str().unwrap()));
+        d.id = "n".into();
+        write_entry_in(dir.path(), &d).unwrap();
+
+        let on = set_cloud_in(dir.path(), "n", true).unwrap();
+        assert!(on.cloud);
+        let stored: Draft =
+            serde_json::from_str(&fs::read_to_string(draft_path(dir.path(), "n")).unwrap())
+                .unwrap();
+        assert!(stored.cloud);
+        // The whole point of an entry-only write.
+        assert_eq!(
+            fs::read_to_string(&file).unwrap(),
+            "on disk, newer than the store"
+        );
+
+        assert!(!set_cloud_in(dir.path(), "n", false).unwrap().cloud);
+        assert!(set_cloud_in(dir.path(), "missing", true).is_err());
     }
 
     #[test]
