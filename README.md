@@ -60,11 +60,15 @@ The app isn't code‑signed / notarized (no paid developer accounts), so the OS 
 - **Find & Replace** (`⌘F`)
 - **Status bar** — line/column + word & character count (toggleable)
 - **Soft‑delete** — deleting a draft leaves an Undo, so nothing goes by accident
-- **Right‑click actions** — Rename, Copy Path, Reveal in Finder, and Export a draft to Markdown/txt/HTML
+- **Right‑click actions** — Rename, Pin, Copy Path, Reveal in Finder, and Export a draft to Markdown/txt/HTML
+- **Open real files** — double‑click a `.txt`/`.md`, "Open With → Jotter", drag a file onto the window, or pass a path on the command line. Files edited elsewhere are re‑read on open, and a save that would overwrite an outside edit asks first (your text is kept as a "conflicted copy")
+- **Focus mode** (`⌃⌘F`) — sidebar, tabs and status bar step aside; optionally fullscreen
+- **Tab indents** — `⇥`/`⇧⇥` indent and outdent (tab or 2/4 spaces); `⎋` then `⇥` moves focus out, so the editor is never a keyboard trap
+- **Movable drafts folder** — point the store at a Syncthing/iCloud/Dropbox folder to keep two Macs in step without the cloud Worker
 - **Optional cloud sync** — back up & sync drafts across devices via a [self‑hostable Worker + R2](https://github.com/byurhannurula/jotter-cloud); opt‑in and off by default
 - **Read‑only sharing** — turn a note into a private link that renders it as a clean web page
 - **Auto‑updates** — in‑app updates via the Tauri updater
-- **Settings** — a sectioned surface: theme, font, text size, word wrap, editor margins (Cozy/Wide), and a full keyboard‑shortcut reference. Every piece of chrome is show/hide‑able
+- **Settings** — a sectioned surface: theme, font, text size, word wrap, Tab key, editor margins (Cozy/Wide), drafts folder, and a full keyboard‑shortcut reference. Every piece of chrome is show/hide‑able, and the sidebar is resizable
 - **Native feel** — overlay titlebar, light/dark, sizes to your display on first run then remembers your size
 - **Local‑first & private** — no account, no telemetry, no analytics; your notes stay on your machine and nothing leaves it unless you explicitly turn on sync. Small (~9 MB) and fast
 
@@ -77,7 +81,7 @@ The full keyboard-shortcut reference lives in the app: **Settings → Shortcuts*
 **How saving works**
 
 - **Autosave** — changes are written ~400 ms after your last keystroke. There's no "unsaved" state.
-- **Drafts store** — every note is a small JSON file in the app's data directory (`~/Library/Application Support/com.byrhn.jotter/drafts/`). A note appears in the sidebar as soon as it has content; empty, untouched notes are never saved.
+- **Drafts store** — every note is a small JSON file in the app's data directory (`~/Library/Application Support/com.byrhn.jotter/drafts/`), or in the folder you pick under Settings → Drafts folder. A note appears in the sidebar as soon as it has content or a name; empty, untouched notes are never saved. Writes are atomic, so a crash mid‑save never leaves a half‑written note.
 - **Real files, on demand** — `⌘S` writes the current draft to a `.txt`/`.md` file wherever you choose. After that, autosave keeps that file up to date too.
 - **Fresh page on launch** — opening the app always gives you a clean page; your previous notes are one click away in the sidebar.
 

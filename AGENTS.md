@@ -32,31 +32,66 @@ compiles.
 ## Test
 
 ```bash
-pnpm test                                    # Vitest — pure logic in src/lib/text.js
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust — drafts store / serde
+pnpm test                                    # Vitest — lib/*.test.js + src/app.test.js
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust — store, sync engine, paths
 ```
 
-Keep both green before committing. Pure, testable logic belongs in `src/lib/text.js`
-(title/preview/search/relTime/findMatches) with a matching `*.test.js`.
+Keep both green before committing. Three layers:
+
+- **Pure units** in `src/lib/*.js`, each with a `*.test.js` beside it: `text.js`
+  (title/preview/search/indent), `tabs.js` (the tab model: open/close/cycle/reopen
+  as state transitions), `keys.js` (what a keypress means), `sync-reconcile.js`,
+  `sync-ui.js`. New logic goes here first.
+- **App wiring** in `src/app.test.js` (happy-dom): boots the real `main.js` against
+  a fake Rust host built on `@tauri-apps/api/mocks`, then drives it through sidebar
+  clicks, menu events and typing. Asserts the editor always shows the active tab's
+  text and nothing is ever written over a note. Add a case here for any change to
+  how tabs, drafts and the editor connect.
+- **Rust** in `lib.rs` `mod tests`: store and atomic writes on a `TempDir`,
+  `sync_core` against a wiremock server, path canonicalisation.
+
+CI runs the JS suite, the format check, and the Rust suite (Linux only) on every
+push. Release runs Rust on all three OSes.
 
 ## Architecture
 
 **Frontend (`src/`)**
 
-- `main.js` — all app logic: `drafts` Map + `openTabs[]`, tab/draft actions, find &
-  replace, markdown preview (per-tab), the settings registry, quick switcher, status
-  bar, and soft-delete. One file on purpose; keep it organized by the existing
-  section comments.
-- `lib/text.js` — pure helpers, unit-tested. `lib/meta.js` — app name/version/author
-  links (drives the About screen; the release script bumps `version` here).
-- `index.html` / `styles.css`.
+- `main.js` — DOM and IPC wiring: rendering, event handlers, find & replace,
+  markdown preview (per-tab), the settings registry, quick switcher, status bar,
+  soft-delete, focus mode, the drafts-folder and Cloud settings. One file on
+  purpose; keep it organized by the existing section comments. Two rules that
+  came from a data-loss bug: only `activate()` and `showInEditor()` change which
+  draft the editor shows, and every read of `editor.value` that flows into a draft
+  goes through `editorTextFor(id)`.
+- `lib/tabs.js` — the tab model as pure transitions (`openInTab`, `closeTab`,
+  `cycleTab`, `reopenClosedTab`, `removeDraftFromView`, `dropScratch`). `main.js`
+  snapshots its globals, runs a transition, writes the result back, then does the
+  effects.
+- `lib/keys.js` — keyboard decisions (`tabKeyAction`: Tab indents, Escape then Tab
+  leaves the editor). `lib/text.js` — pure text helpers. `lib/meta.js` — app
+  name/version/author links (drives the About screen; the release script bumps
+  `version` here).
+- `index.html` / `styles.css`. `--titlebar-h` in the CSS must match `TITLEBAR_H` in
+  `lib.rs` (the macOS traffic lights are positioned from it).
 
 **Rust host (`src-tauri/src/lib.rs`)**
 
-- Drafts-store commands: `init_store`, `save_draft`, `delete_draft`, `read_text_file`.
+- Drafts-store commands: `init_store`, `save_draft`, `delete_draft`, `read_text_file`,
+  `write_text_file`, `canonical_path`, `write_conflict_copy`, `get_drafts_dir`,
+  `set_drafts_dir`, `open_drafts_dir`. Sync: `sync_now`, `list_drafts`,
+  `synced_ids`, `forget_remote_copy`, the `*_sync_config` pair, and the share
+  commands. Open-with: `take_opened_files` drains files buffered before the webview
+  was ready; later opens arrive as the `open-files` event.
 - Native menu built once in `build_menu`; menu clicks `emit("menu", <id>)` to the
   webview, handled by the `listen("menu", …)` switch in `main.js`.
-- Store lives at `app_data_dir()/drafts/<id>.json`, one file per draft.
+- Store lives at `app_data_dir()/drafts/<id>.json`, one file per draft, unless
+  `app_data_dir()/store.json` points it elsewhere (Settings → Drafts folder). All
+  writes go through `write_atomic` (temp sibling + rename). `sync.json`,
+  `shares.json`, `window.json` stay in `app_data_dir()`.
+- A file-backed draft carries `file_mtime`; `save_draft` refuses with `"conflict"`
+  when the file on disk has a different mtime, and the frontend parks the editor
+  text as `name (conflicted copy).ext` before asking Reload or Keep mine.
 
 **Persistence model:** every launch opens a fresh blank page; saved drafts appear in
 the sidebar. Autosave writes ~400 ms after the last keystroke. `⌘S` also writes a real
@@ -78,8 +113,7 @@ the sidebar. Autosave writes ~400 ms after the last keystroke. `⌘S` also write
   `html[data-theme="dark"]`. Update all four (the `@media` and `[data-theme=dark]`
   blocks use different indentation — a `replace_all` won't catch both).
 - **No emojis** in code, comments, or commit messages. **No new README/docs files**
-  unless explicitly requested. Plan docs go in `docs/` and are left uncommitted unless
-  asked.
+  unless explicitly requested. Plan and review docs go in `plans/` (gitignored).
 
 ## Performance
 
@@ -94,7 +128,7 @@ The editor must stay snappy on large pastes/docs. Keep these invariants:
 
 `pnpm release <patch|minor|major>` bumps the version in all four files, gates on
 tests, tags, and pushes; CI builds every OS and drafts a GitHub Release. See the
-`release-jotter` skill and `docs/plan-release-automation.md`. Builds are intentionally
+`release` skill and `plans/plan-release-automation.md`. Builds are intentionally
 **unsigned** — no notarization/signing steps unless an Apple Developer account exists.
 
 ## Commits
