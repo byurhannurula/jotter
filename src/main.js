@@ -873,7 +873,13 @@ function editorTextFor(id) {
 /** Whether Escape has armed the tab-out. The rule lives in lib/keys.js. */
 let tabEscapes = false;
 
+/** True for the keydown of a second Escape in a row inside the editor. The
+ *  first arms the tab-out; the second is the user asking for more than that,
+ *  which in focus mode means "let me out". Read by the document handler. */
+let escapeRepeated = false;
+
 function onEditorKeydown(e) {
+  escapeRepeated = e.key === "Escape" && tabEscapes;
   const { action, armed } = tabKeyAction(e, {
     mode: getSetting("tabkey"),
     armed: tabEscapes,
@@ -1352,6 +1358,7 @@ const SHORTCUTS = [
       ["⌘B", "Toggle sidebar"],
       ["⇧⌘P", "Toggle markdown preview"],
       ["⌃⌘F / ⇧⌘F", "Focus mode"],
+      ["⎋ ⎋", "Leave focus mode"],
       ["⌘,", "Settings"],
     ],
   ],
@@ -3033,9 +3040,10 @@ async function init() {
         searchQuery = "";
         renderList();
         editor.focus();
-      } else if (focusMode && !isEditableFocused()) {
-        // Only leave focus mode when Escape wasn't aimed at the editor — in
-        // there it arms the Esc-then-Tab exit, and shouldn't do both.
+      } else if (focusMode && (!isEditableFocused() || escapeRepeated)) {
+        // In the editor a single Escape only arms the Esc-then-Tab exit, so it
+        // doesn't do two things at once. A second Escape in a row, or Escape
+        // from anywhere else, leaves focus mode.
         toggleFocusMode(false);
       }
     }
