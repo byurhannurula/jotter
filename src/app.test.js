@@ -272,6 +272,107 @@ describe("closing, reopening, and cycling tabs", () => {
   });
 });
 
+describe("keyboard access", () => {
+  const key = (el, k, init = {}) =>
+    el.dispatchEvent(
+      new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...init }),
+    );
+
+  beforeEach(async () => {
+    app = await boot(seed());
+  });
+
+  it("arrows move between tabs and show each draft, without stealing focus", async () => {
+    await app.clickDraft("draft-a");
+    await app.clickDraft("draft-b");
+    const tabB = document.querySelector('#tabs .tab[data-id="draft-b"]');
+    expect(tabB.getAttribute("role")).toBe("tab");
+    expect(tabB.tabIndex).toBe(0);
+    tabB.focus();
+    key(tabB, "ArrowLeft");
+    await settle();
+    expect(app.activeTabId()).toBe("draft-a");
+    expect(app.editor.value).toBe("alpha text");
+    expect(document.activeElement?.dataset.id).toBe("draft-a");
+    expect(document.activeElement.tabIndex).toBe(0);
+    expect(tabB.tabIndex).toBe(-1);
+  });
+
+  it("Enter on a tab sends focus into the editor", async () => {
+    await app.clickDraft("draft-a");
+    const tab = document.querySelector('#tabs .tab[data-id="draft-a"]');
+    tab.focus();
+    key(tab, "Enter");
+    await settle();
+    expect(document.activeElement).toBe(app.editor);
+  });
+
+  it("ArrowDown from the search field walks the sidebar, Enter opens the row", async () => {
+    const search = document.getElementById("search");
+    search.focus();
+    key(search, "ArrowDown");
+    expect(document.activeElement?.dataset.id).toBe("draft-a");
+    key(document.activeElement, "ArrowDown");
+    expect(document.activeElement?.dataset.id).toBe("draft-b");
+    key(document.activeElement, "Enter");
+    await settle();
+    expect(app.activeTabId()).toBe("draft-b");
+    expect(app.editor.value).toBe("bravo text");
+    expect(document.activeElement).toBe(app.editor);
+  });
+
+  it("Backspace on a sidebar row deletes it with an undo", async () => {
+    const row = document.querySelector('#draft-list .draft-item[data-id="draft-a"]');
+    row.focus();
+    key(row, "Backspace");
+    await settle();
+    expect(app.sidebarIds()).toEqual(["draft-b"]);
+    expect(await app.clickToast("Undo")).toBe(true);
+    expect([...app.sidebarIds()].sort()).toEqual(["draft-a", "draft-b"]);
+  });
+
+  it("the context menu opens from the keyboard, arrows through items, and hands focus back", async () => {
+    const row = document.querySelector('#draft-list .draft-item[data-id="draft-a"]');
+    row.focus();
+    key(row, "ContextMenu");
+    await settle();
+    const menu = document.getElementById("context-menu");
+    expect(menu).not.toBeNull();
+    expect(menu.contains(document.activeElement)).toBe(true);
+    const first = document.activeElement;
+    key(document.activeElement, "ArrowDown");
+    expect(document.activeElement).not.toBe(first);
+    expect(menu.contains(document.activeElement)).toBe(true);
+    key(document.activeElement, "Tab");
+    await settle();
+    expect(document.getElementById("context-menu")).toBeNull();
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("settings takes focus on open, keeps Tab inside, and gives focus back on close", async () => {
+    await app.clickDraft("draft-a");
+    expect(document.activeElement).toBe(app.editor);
+    await app.menu("settings");
+    const settings = document.getElementById("settings");
+    expect(settings.hidden).toBe(false);
+    expect(settings.contains(document.activeElement)).toBe(true);
+
+    const focusable = [...settings.querySelectorAll("button, input, [tabindex]")].filter(
+      (el) => !el.closest("[hidden]") && el.tabIndex !== -1 && !el.disabled,
+    );
+    const last = focusable[focusable.length - 1];
+    last.focus();
+    key(last, "Tab");
+    expect(document.activeElement).toBe(focusable[0]);
+    key(focusable[0], "Tab", { shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    document.getElementById("settings-close").click();
+    await settle();
+    expect(document.activeElement).toBe(app.editor);
+  });
+});
+
 describe("a mixed session", () => {
   it("always shows the active draft's text and never loses an edit", async () => {
     app = await boot(seed());

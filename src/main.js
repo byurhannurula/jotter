@@ -23,6 +23,7 @@ import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
 import * as tabModel from "./lib/tabs.js";
 import { tabKeyAction } from "./lib/keys.js";
+import * as modals from "./lib/modals.js";
 import {
   TOKEN_MASK,
   isTypedToken as isTypedTokenValue,
@@ -190,6 +191,9 @@ function makeItem(d) {
   li.className = "draft-item" + (d.id === currentId ? " active" : "") + (d.pinned ? " pinned" : "");
   li.dataset.id = d.id;
   li.title = draftTooltip(d);
+  li.setAttribute("role", "option");
+  li.setAttribute("aria-selected", String(d.id === currentId));
+  li.tabIndex = d.id === currentId ? 0 : -1; // roving: see roveRows()
 
   const icon = document.createElement("span");
   icon.className = "draft-icon";
@@ -290,7 +294,16 @@ function renderList() {
     itemEls.set(d.id, li);
     listEl.append(li);
   }
+  ensureRowInTabOrder();
   listEl.scrollTop = scroll;
+}
+
+/** Exactly one sidebar row is in the tab order: the active draft's, or the
+ *  first when the active draft is not listed. */
+function ensureRowInTabOrder() {
+  const rows = [...listEl.querySelectorAll(".draft-item")];
+  if (!rows.length || rows.some((r) => r.tabIndex === 0)) return;
+  rows[0].tabIndex = 0;
 }
 
 function refreshActiveItem() {
@@ -328,6 +341,9 @@ function renderTabs() {
     const tab = document.createElement("div");
     tab.className = "tab" + (id === currentId ? " active" : "");
     tab.dataset.id = id;
+    tab.setAttribute("role", "tab");
+    tab.setAttribute("aria-selected", String(id === currentId));
+    tab.tabIndex = id === currentId ? 0 : -1; // roving: arrows move between tabs
 
     const title = document.createElement("span");
     title.className = "tab-title";
@@ -337,6 +353,8 @@ function renderTabs() {
     close.className = "tab-close";
     close.innerHTML = ICON_CLOSE;
     close.title = "Close tab (⌘W)";
+    close.setAttribute("aria-label", "Close tab");
+    close.tabIndex = -1; // ⌘W and Backspace on the tab do this from the keyboard
     close.addEventListener("click", (e) => {
       e.stopPropagation();
       closeTab(id);
@@ -360,10 +378,17 @@ function renderAll() {
 /** Move the active highlight to `currentId` without rebuilding tabs/list. */
 function setActiveHighlights() {
   for (const [id, li] of itemEls) {
-    li.classList.toggle("active", id === currentId);
+    const on = id === currentId;
+    li.classList.toggle("active", on);
+    li.setAttribute("aria-selected", String(on));
+    li.tabIndex = on ? 0 : -1;
   }
+  ensureRowInTabOrder();
   for (const tab of tabsEl.children) {
-    tab.classList.toggle("active", tab.dataset.id === currentId);
+    const on = tab.dataset.id === currentId;
+    tab.classList.toggle("active", on);
+    tab.setAttribute("aria-selected", String(on));
+    tab.tabIndex = on ? 0 : -1;
   }
 }
 
@@ -661,9 +686,9 @@ function runTabEffects(effects) {
   }
 }
 
-async function activate(id) {
+async function activate(id, { focusEditor = true } = {}) {
   if (id === currentId) {
-    focusEnd();
+    if (focusEditor) focusEnd();
     return;
   }
   await flush();
@@ -691,10 +716,10 @@ async function activate(id) {
   refreshItemInPlace(id); // the row's content may have changed (disk re-read)
   updateWindowTitle();
   updateStatus();
-  focusEnd();
+  if (focusEditor) focusEnd();
 }
 
-async function openInTab(id) {
+async function openInTab(id, opts) {
   if (!drafts.has(id)) return;
   const wasOpen = openTabs.includes(id);
   const { state, effects } = tabModel.openInTab(tabState(), tabDeps, id);
@@ -704,7 +729,60 @@ async function openInTab(id) {
   openTabs = state.openTabs;
   runTabEffects(effects);
   if (!wasOpen) renderTabs(); // a genuinely new tab appears (and animates in)
-  await activate(id);
+  await activate(id, opts);
+}
+
+// --- keyboard access for the tab bar and the sidebar ------------------------
+//
+// Both are roving-tabindex widgets: one item is in the tab order, arrows move
+// between items, Enter opens, Backspace deletes or closes. Focus stays on the
+// widget while arrowing so a screen-reader user can hear each item; Enter is
+// what sends focus into the editor.
+
+function tabEl(id) {
+  return tabsEl.querySelector(`.tab[data-id="${CSS.escape(id)}"]`);
+}
+
+function onTabsKeydown(e) {
+  const tab = e.target.closest?.(".tab");
+  if (!tab) return;
+  const id = tab.dataset.id;
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    activate(id);
+    return;
+  }
+  if (e.key === "Backspace" || e.key === "Delete") {
+    e.preventDefault();
+    closeTab(id).then(() => tabEl(currentId)?.focus());
+    return;
+  }
+  const target = modals.roveFocus(e, [...tabsEl.querySelectorAll(".tab")]);
+  // Arrowing switches the visible draft too, the way browser tab bars do.
+  if (target) activate(target.dataset.id, { focusEditor: false }).then(() => target.focus());
+}
+
+function onRowsKeydown(e) {
+  const row = e.target.closest?.(".draft-item");
+  if (!row) return;
+  const id = row.dataset.id;
+  const rows = [...listEl.querySelectorAll(".draft-item")];
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    openInTab(id);
+  } else if (e.key === "Backspace" || e.key === "Delete") {
+    e.preventDefault();
+    deleteDraft(id);
+  } else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) {
+    e.preventDefault();
+    const r = row.getBoundingClientRect();
+    openDraftMenu({ preventDefault() {}, clientX: r.left + 24, clientY: r.top + r.height / 2 }, id);
+  } else if (e.key === "ArrowUp" && rows.indexOf(row) === 0) {
+    e.preventDefault();
+    searchEl.focus(); // off the top of the list is the search field
+  } else {
+    modals.roveFocus(e, rows, { vertical: true });
+  }
 }
 
 async function newTab() {
@@ -2208,6 +2286,7 @@ function openSettings(section = "general") {
   openModal("settings");
   showSection(section);
   if (section === "sync") refreshSyncSection();
+  modals.focusFirst(document.getElementById("settings"));
 }
 
 function initSettings() {
@@ -2276,12 +2355,19 @@ function showToast(
 
 let ctxCleanup = null;
 
+let ctxOpener = null;
+
 function closeContextMenu() {
-  document.getElementById("context-menu")?.remove();
+  const menu = document.getElementById("context-menu");
+  if (!menu) return;
+  menu.remove();
   if (ctxCleanup) {
     ctxCleanup();
     ctxCleanup = null;
   }
+  // Focus went into the menu when it opened; hand it back.
+  if (ctxOpener?.isConnected) ctxOpener.focus();
+  ctxOpener = null;
 }
 
 /** Show a small menu at (x, y). `items` = {label, action, disabled} or {separator}. */
@@ -2319,7 +2405,24 @@ function showContextMenu(x, y, items) {
     }
     menu.append(b);
   }
+  menu.setAttribute("role", "menu");
+  for (const b of menu.querySelectorAll(".context-item")) {
+    b.setAttribute("role", "menuitem");
+    b.tabIndex = -1;
+  }
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") {
+      e.preventDefault();
+      closeContextMenu();
+      return;
+    }
+    modals.roveFocus(e, [...menu.querySelectorAll(".context-item:not(.disabled)")], {
+      vertical: true,
+    });
+  });
   document.body.append(menu);
+  ctxOpener = document.activeElement;
+  menu.querySelector(".context-item:not(.disabled)")?.focus();
 
   // Clamp to the viewport.
   const r = menu.getBoundingClientRect();
@@ -2886,16 +2989,17 @@ function initFind() {
 function openModal(id) {
   const el = document.getElementById(id);
   el.classList.remove("closing");
-  el.hidden = false;
+  modals.open(el);
 }
 
 function closeModal(id) {
-  const el = document.getElementById(id);
-  el.classList.add("closing");
-  setTimeout(() => {
-    el.hidden = true;
-    el.classList.remove("closing");
-  }, 160);
+  modals.close(document.getElementById(id), (el) => {
+    el.classList.add("closing");
+    setTimeout(() => {
+      el.hidden = true;
+      el.classList.remove("closing");
+    }, 160);
+  });
 }
 
 function bindBackdrop(id) {
@@ -2907,7 +3011,7 @@ function bindBackdrop(id) {
 
 /** True while any overlay (settings / quick-open / prompt) is showing. */
 function anyModalOpen() {
-  return ["settings", "switcher", "prompt"].some((id) => !document.getElementById(id).hidden);
+  return modals.any();
 }
 
 /** True when focus is in a text field, where a keystroke is editing, not a command. */
@@ -2954,6 +3058,19 @@ async function init() {
   document.getElementById("new-tab").addEventListener("click", newTab);
   document.getElementById("sidebar-toggle").addEventListener("click", toggleSidebar);
   document.getElementById("preview-toggle").addEventListener("click", togglePreview);
+  tabsEl.addEventListener("keydown", onTabsKeydown);
+  listEl.addEventListener("keydown", onRowsKeydown);
+  searchEl.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown") return;
+    const first = listEl.querySelector(".draft-item");
+    if (!first) return;
+    e.preventDefault();
+    first.tabIndex = 0;
+    first.focus();
+  });
+  for (const id of ["settings", "switcher", "prompt"]) {
+    document.getElementById(id).addEventListener("keydown", modals.trapTab);
+  }
   searchEl.addEventListener("input", () => {
     searchQuery = searchEl.value.trim().toLowerCase();
     renderList();
@@ -3014,14 +3131,19 @@ async function init() {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (!document.getElementById("switcher").hidden) closeModal("switcher");
-      else if (!document.getElementById("settings").hidden) closeModal("settings");
+      const overlay = modals.top();
+      if (overlay) closeModal(overlay.id);
       else if (find.open) closeFind();
       else if (document.activeElement === searchEl) {
         searchEl.value = "";
         searchQuery = "";
         renderList();
         editor.focus();
+      } else if (
+        listEl.contains(document.activeElement) ||
+        tabsEl.contains(document.activeElement)
+      ) {
+        editor.focus(); // out of the sidebar or tab bar, back to writing
       } else if (focusMode && (!isEditableFocused() || escapeRepeated)) {
         // In the editor a single Escape only arms the Esc-then-Tab exit, so it
         // doesn't do two things at once. A second Escape in a row, or Escape

@@ -71,7 +71,7 @@
               autocomplete="off"
             />
           </div>
-          <ul id="draft-list" class="draft-list"></ul>
+          <ul id="draft-list" class="draft-list" role="listbox" aria-label="Drafts"></ul>
         </div>
         <div
           id="sidebar-resize"
@@ -107,7 +107,13 @@
               <path d="M9.5 4v16" />
             </svg>
           </button>
-          <div id="tabs" class="tabs" data-tauri-drag-region></div>
+          <div
+            id="tabs"
+            class="tabs"
+            role="tablist"
+            aria-label="Open tabs"
+            data-tauri-drag-region
+          ></div>
           <button id="new-tab" class="icon-btn tab-new" title="New tab (⌘T)" aria-label="New tab">
             <svg
               viewBox="0 0 24 24"

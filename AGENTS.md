@@ -76,6 +76,11 @@ push. Release runs Rust on all three OSes.
   `cycleTab`, `reopenClosedTab`, `removeDraftFromView`, `dropScratch`). `main.js`
   snapshots its globals, runs a transition, writes the result back, then does the
   effects.
+- `lib/modals.js` — one stack for the overlays (settings, switcher, prompt): Escape
+  closes the top one, Tab stays inside, focus returns to the opener on close. Also
+  `roveFocus`, the roving-tabindex helper the tab bar, sidebar rows and context
+  menu share. Keyboard rule: the tab bar and sidebar are one tab stop each; arrows
+  move, Enter opens and sends focus to the editor, Backspace closes or deletes.
 - `lib/keys.js` — keyboard decisions (`tabKeyAction`: Tab indents, Escape then Tab
   leaves the editor). `lib/text.js` — pure text helpers. `lib/meta.js` — app
   name/version/author links (drives the About screen; the release script bumps
