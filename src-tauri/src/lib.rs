@@ -782,9 +782,24 @@ async fn sync_core(
         .map_err(|e| e.to_string())?;
 
     for entry in list.drafts {
+        // A draft this device has just deleted is still listed by the worker
+        // until our own DELETE goes out later in this pass. Pulling it back
+        // first would resurrect it in the sidebar for one sync interval, and
+        // the pass after that would delete it again.
+        // A draft this device has just deleted is still listed by the worker
+        // until our own DELETE goes out later in this pass. Pulling it back
+        // first would resurrect it in the sidebar for one sync interval, and
+        // the pass after that would delete it again.
+        if tombstones.contains_key(&entry.id) {
+            continue;
+        }
         if entry.deleted {
             if let Some(l) = local.get(&entry.id) {
-                if delete_wins(l.updated_at, entry.updated_at) {
+                // A remote deletion has no authority over a draft that no
+                // longer syncs. Opting a file out records a tombstone, the
+                // worker echoes it back as deleted, and applying that here
+                // would remove the local draft two passes later.
+                if syncs_to_cloud(l) && delete_wins(l.updated_at, entry.updated_at) {
                     let _ = fs::remove_file(draft_path(dir, &entry.id));
                     local.remove(&entry.id);
                     changed = true;
@@ -2026,6 +2041,89 @@ mod tests {
 
         assert_eq!(pushed, vec!["draft-c".to_string()]);
         assert_eq!(synced.get("draft-c"), Some(&300));
+    }
+
+    #[tokio::test]
+    async fn a_draft_awaiting_its_own_delete_is_not_pulled_back() {
+        // The worker still lists a draft this device has deleted, right up
+        // until our DELETE goes out later in the same pass. Downloading it
+        // first put it back in the sidebar for a whole sync interval.
+        let dir = TempDir::new().unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(serde_json::json!([
+                { "id": "draft-c", "updatedAt": 300, "deleted": false }
+            ])))
+            .mount(&server)
+            .await;
+        // Fetching the body would be the bug; this mock must never be hit.
+        Mock::given(method("GET"))
+            .and(path("/drafts/draft-c"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/drafts/draft-c"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let mut tombstones = HashMap::new();
+        tombstones.insert("draft-c".to_string(), 300i64);
+        let (_, _, pushed) = sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &tombstones,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(pushed, vec!["draft-c".to_string()]);
+        assert!(!draft_path(dir.path(), "draft-c").exists());
+    }
+
+    #[tokio::test]
+    async fn a_remote_delete_does_not_remove_a_draft_that_no_longer_syncs() {
+        // Opting a file out records a tombstone; the worker echoes it back as
+        // deleted. Applying that here removed the local draft two passes later,
+        // taking its title, pin and mtime with it.
+        let dir = TempDir::new().unwrap();
+        let mut d = draft("kept locally", Some("/tmp/kept.md"));
+        d.id = "draft-local".into();
+        d.updated_at = 100;
+        d.cloud = false; // opted out, so remote deletions do not apply
+        let json = serde_json::to_string(&d).unwrap();
+        fs::write(draft_path(dir.path(), "draft-local"), json).unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/drafts"))
+            .respond_with(drafts_list(serde_json::json!([
+                { "id": "draft-local", "updatedAt": 200, "deleted": true }
+            ])))
+            .mount(&server)
+            .await;
+
+        sync_core(
+            &http_client(15).unwrap(),
+            &server.uri(),
+            "tok",
+            dir.path(),
+            HashMap::new(),
+            &HashMap::new(),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            draft_path(dir.path(), "draft-local").exists(),
+            "a draft that does not sync must survive a remote delete"
+        );
     }
 
     #[tokio::test]
