@@ -474,17 +474,30 @@ function togglePreview() {
 
 // --- persistence ---------------------------------------------------------
 
+/** Write a draft to the store and nudge the debounced cloud sync.
+ *
+ * Every save goes through here. Five call sites used to inline the invoke and
+ * three of them remembered the sync, which is why a rename never reached the
+ * cloud until some unrelated edit pushed it. Pass `sync: false` only when the
+ * caller has a reason not to.
+ */
+async function saveDraft(d, { sync = true } = {}) {
+  try {
+    await invoke("save_draft", { draft: d });
+    if (sync) scheduleSync();
+    return true;
+  } catch (err) {
+    console.error("save_draft failed:", err);
+    return false;
+  }
+}
+
 async function persist() {
   const d = drafts.get(currentId);
   if (!d) return;
   d.content = editor.value; // pull the latest text at save time
   if (isEmpty(d)) return; // don't write empty untouched blanks
-  try {
-    await invoke("save_draft", { draft: d });
-    scheduleSync(); // nudge a debounced cloud sync once edits settle
-  } catch (err) {
-    console.error("save_draft failed:", err);
-  }
+  await saveDraft(d);
 }
 
 function scheduleSave() {
@@ -2226,7 +2239,7 @@ async function renameDraft(id) {
   if (name === null) return; // cancelled
   d.title = name;
   d.updated_at = Date.now();
-  await invoke("save_draft", { draft: d }).catch((e) => console.error(e));
+  await saveDraft(d); // the new title has to reach the cloud too
   renderAll();
 }
 
@@ -2390,12 +2403,9 @@ async function syncFileToCloud(id) {
   const d = drafts.get(id);
   if (!d || !d.file_path) return;
   d.cloud = true;
-  try {
-    await invoke("save_draft", { draft: d });
-    scheduleSync();
+  if (await saveDraft(d)) {
     showToast("Syncing this file to the cloud");
-  } catch (err) {
-    console.error("cloud opt-in failed:", err);
+  } else {
     d.cloud = false; // roll back so the menu still offers it
     showToast("Couldn't enable sync for this file");
   }
@@ -2423,12 +2433,7 @@ async function togglePin(id) {
   if (!d) return;
   d.pinned = !d.pinned;
   d.updated_at = Date.now();
-  try {
-    await invoke("save_draft", { draft: d });
-    scheduleSync();
-  } catch (err) {
-    console.error("pin toggle failed:", err);
-  }
+  await saveDraft(d);
   renderList(); // re-order + repaint the pin class/marker
   showToast(d.pinned ? "Pinned to top" : "Unpinned");
 }
