@@ -1,66 +1,115 @@
 // @vitest-environment happy-dom
 //
 // Random sessions with an oracle. fast-check generates sequences of the things
-// a person does — open, close, cycle, reopen, type, delete, undo, and pauses of
+// a person does — open, close, cycle, reopen, type, rename, pin, delete, undo,
+// an outside edit to a file-backed note, a sync landing, and pauses of
 // different lengths — runs each one against the real main.js, and after every
 // step compares the app to a small model of what should be true. A failing run
 // is shrunk to the shortest sequence that still fails.
 //
-// The rules checked after every step are the ones that break when tab and
-// editor wiring goes wrong: the editor shows the active draft's text, the tabs
-// are what the model says they are, the sidebar lists exactly the drafts with
-// content, the store never lags a draft that is not mid-autosave, and no save
+// The rules checked after every step are the ones that break when tab, editor
+// and store wiring goes wrong: the editor shows the active draft's text, the
+// tabs and the sidebar (order included) are what the model says, the store or
+// the file on disk never lags a draft that is not mid-autosave, and no save
 // ever wrote text the model never had.
 //
 // JOTTER_FUZZ_RUNS=200 pnpm test -- app.random   for a deep run.
+// JOTTER_FUZZ_SEED=<n> JOTTER_FUZZ_PATH=<replayPath>   to replay one reported failure.
 
 import { describe, it, expect, afterEach } from "vitest";
 import fc from "fast-check";
 import { clearMocks } from "@tauri-apps/api/mocks";
-import { boot, sleep, AUTOSAVE_MS } from "./app-harness.js";
+import { emit } from "@tauri-apps/api/event";
+import { boot, sleep, settle, AUTOSAVE_MS } from "./app-harness.js";
 
-const RUNS = Number(process.env.JOTTER_FUZZ_RUNS) || 8;
+const RUNS = Number(process.env.JOTTER_FUZZ_RUNS) || 6;
 
 let bootCount = 0;
+/** When the last Type happened, in any session. An autosave timer from the
+ *  previous session would otherwise fire into the next one's store. */
+let lastEditAt = 0;
 
-/** Two drafts with ids no other boot in this process will reuse. */
+/** Two in-app drafts and one file-backed draft, with ids no other boot in this
+ *  process will reuse (a stray timer from an earlier boot must not find them). */
 function seedDrafts() {
   bootCount += 1;
-  const mk = (id, content, u) => ({
+  const mk = (id, content, u, file_path = null) => ({
     id: `d${bootCount}-${id}`,
     title: "",
     content,
-    file_path: null,
+    file_path,
     created_at: 1,
     updated_at: u,
     pinned: false,
     cloud: false,
+    file_mtime: file_path ? 1000 : null,
   });
-  return [mk("a", "alpha text", 2), mk("b", "bravo text", 1)];
+  return {
+    drafts: [
+      mk("a", "alpha text", 3),
+      mk("b", "bravo text", 2),
+      mk("f", "file text", 1, `/notes/${bootCount}/f.txt`),
+    ],
+    files: { [`/notes/${bootCount}/f.txt`]: "file text" },
+  };
 }
 
 /** What the app should look like, from the test's point of view. */
 class Model {
   constructor(drafts) {
     this.content = new Map(drafts.map((d) => [d.id, d.content]));
+    this.title = new Map();
+    this.file = new Map(drafts.filter((d) => d.file_path).map((d) => [d.id, d.file_path]));
+    this.pinned = new Set();
+    this.lastEdit = new Map(drafts.map((d) => [d.id, d.updated_at]));
+    this.clock = 100; // later than any seeded updated_at
     this.open = []; // tab ids, left to right
     this.active = null;
     this.closed = []; // reopen stack
     this.deleted = new Set();
-    this.dirty = null; // id with an autosave pending
     this.undoable = []; // deleted ids whose Undo toast may still be up, oldest first
+    this.dirty = null; // id with an autosave pending
+    this.conflict = null; // file draft whose save was refused; toast is up
+    this.stale = new Set(); // file drafts whose memory copy is behind the file
+    // The mtime the app believes each file has: set on read and on a
+    // successful write. A save compares it with the real one.
+    this.knownMtime = new Map(drafts.filter((d) => d.file_path).map((d) => [d.id, d.file_mtime]));
   }
-  /** Ids the sidebar should show: content, and not deleted. Sorted for stable picking. */
+  touch(id) {
+    this.clock += 1;
+    this.lastEdit.set(id, this.clock);
+  }
+  /** A draft the sidebar shows: text (whitespace is not text), a name, or a
+   *  file behind it. Mirrors isEmpty() in lib/text.js. */
+  saved(id) {
+    return this.content.get(id).trim() !== "" || !!this.title.get(id) || this.file.has(id);
+  }
+  /** Sidebar rows in order: pinned first, then most recently edited first. */
   sidebar() {
     return [...this.content.keys()]
-      .filter((id) => this.content.get(id) !== "" && !this.deleted.has(id))
-      .sort();
+      .filter((id) => this.saved(id) && !this.deleted.has(id))
+      .sort((x, y) => {
+        const px = this.pinned.has(x) ? 1 : 0;
+        const py = this.pinned.has(y) ? 1 : 0;
+        if (px !== py) return py - px;
+        return this.lastEdit.get(y) - this.lastEdit.get(x);
+      });
   }
   /** A brand-new blank became current: learn its id from the app. */
   adoptBlank(id) {
     if (!this.content.has(id)) this.content.set(id, "");
+    if (!this.lastEdit.has(id)) this.lastEdit.set(id, 0);
     if (!this.open.includes(id)) this.open.push(id);
     this.active = id;
+  }
+  /** The app re-read a file draft from disk. */
+  reread(id, real) {
+    if (!this.file.has(id)) return;
+    this.content.set(id, real.host.disk.get(this.file.get(id)));
+    this.knownMtime.set(id, real.host.mtimes.get(this.file.get(id)));
+    if (this.dirty === id) this.dirty = null;
+    if (this.conflict === id) this.conflict = null;
+    this.stale.delete(id);
   }
 }
 
@@ -73,11 +122,20 @@ function check(model, real, before, savesBefore) {
     model.content.get(model.active) ?? "",
   );
   expect(real.tabIds(), "open tabs").toEqual(model.open);
-  expect([...real.sidebarIds()].sort(), "sidebar").toEqual(model.sidebar());
+  expect(real.sidebarIds(), "sidebar order").toEqual(model.sidebar());
 
   for (const [id, text] of model.content) {
-    if (text === "" || model.deleted.has(id) || id === model.dirty) continue;
-    expect(real.host.store.get(id)?.content, `store copy of ${id}`).toBe(text);
+    // A draft mid-conflict keeps its refused edit in memory; nothing on disk
+    // or in the store is expected to match until the toast is answered.
+    if (model.deleted.has(id) || id === model.dirty || id === model.conflict) continue;
+    if (model.stale.has(id)) continue;
+    if (model.file.has(id)) {
+      // A file draft's truth is the file. The store entry may lag after a
+      // re-read, which only touches memory.
+      expect(real.host.disk.get(model.file.get(id)), `disk copy of ${id}`).toBe(text);
+    } else if (model.saved(id)) {
+      expect(real.host.store.get(id)?.content, `store copy of ${id}`).toBe(text);
+    }
   }
 
   // Every save the command caused wrote text the model had for that id, either
@@ -86,8 +144,17 @@ function check(model, real, before, savesBefore) {
     if (!model.content.has(s.id) && !before.has(s.id)) continue; // a stray timer from an earlier boot
     const allowed = [before.get(s.id), model.content.get(s.id)];
     expect(allowed, `save of ${s.id} wrote "${s.content}"`).toContain(s.content);
-    expect(s.content, "a save must never write a blank over a note").not.toBe("");
+    // A named note may be emptied on purpose and is kept; an unnamed in-app
+    // draft with nothing in it is never written.
+    if (!model.file.has(s.id) && !model.title.get(s.id)) {
+      expect(s.content.trim(), "a save must never write a blank over a note").not.toBe("");
+    }
   }
+
+  const toast = [...document.querySelectorAll("#toast-host .toast:not(.out) .toast-action")].some(
+    (b) => b.textContent === "Reload",
+  );
+  expect(toast, "conflict toast").toBe(model.conflict !== null);
 }
 
 /** Wrap a command so its run() records the before-state and checks after. */
@@ -102,6 +169,10 @@ function cmd(name, { check: pre = () => true, run }) {
     async run(m, real) {
       const before = new Map(m.content);
       const savesBefore = real.host.saves.length;
+      // What the files' mtimes were when the command started: a write the
+      // command itself causes bumps them, and the app's conflict check ran
+      // against the values before that write.
+      m.mtimesBefore = new Map(real.host.mtimes);
       await run(m, real, this.arg);
       check(m, real, before, savesBefore);
     }
@@ -111,22 +182,55 @@ function cmd(name, { check: pre = () => true, run }) {
   };
 }
 
+const pick = (m, i) => {
+  const ids = m.sidebar();
+  return ids[i % ids.length];
+};
+
+/** The app tried to write the pending edit. For a file draft whose file moved
+ *  on underneath, the write is refused and the conflict toast goes up; the
+ *  edit stays pending. Otherwise the store (and file) now hold it. */
+function flushed(m, real) {
+  const id = m.dirty;
+  if (id === null) return;
+  const path = m.file.get(id);
+  if (path && m.mtimesBefore.get(path) !== m.knownMtime.get(id)) {
+    m.conflict = id;
+    return;
+  }
+  m.dirty = null;
+  wrote(m, real, id);
+}
+
+/** The app wrote a file draft: it now knows the file's new mtime. Renames and
+ *  pins write too, whether or not anything was typed. */
+function wrote(m, real, id) {
+  const path = m.file.get(id);
+  if (path) m.knownMtime.set(id, real.host.mtimes.get(path));
+}
+
+/** Becoming current through activate(): flushes the old tab, re-reads a file. */
+function switchTo(m, real, id) {
+  if (id === m.active) return; // activating the active tab is a no-op
+  flushed(m, real);
+  m.reread(id, real);
+  m.active = id;
+}
+
 const ClickDraft = cmd("ClickDraft", {
   check: (m) => m.sidebar().length > 0,
   run: async (m, real, i) => {
-    const ids = m.sidebar();
-    const id = ids[i % ids.length];
+    const id = pick(m, i);
     await real.clickDraft(id);
-    if (id !== m.active) m.dirty = null; // the switch flushed
     if (!m.open.includes(id)) m.open.push(id);
-    m.active = id;
+    switchTo(m, real, id);
   },
 });
 
 const NewTab = cmd("NewTab", {
   run: async (m, real) => {
     await real.menu("new");
-    m.dirty = null;
+    flushed(m, real);
     m.adoptBlank(real.activeTabId());
   },
 });
@@ -134,13 +238,13 @@ const NewTab = cmd("NewTab", {
 const CloseTab = cmd("CloseTab", {
   run: async (m, real) => {
     const id = m.active;
-    const blank = m.content.get(id) === "";
+    const blank = !m.saved(id);
     if (m.open.length === 1 && blank) {
       await real.menu("close_tab");
       return; // nothing to close
     }
     await real.menu("close_tab");
-    m.dirty = null;
+    flushed(m, real);
     const idx = m.open.indexOf(id);
     m.open.splice(idx, 1);
     if (blank) {
@@ -149,7 +253,7 @@ const CloseTab = cmd("CloseTab", {
       m.closed.push(id);
     }
     if (m.open.length === 0) m.adoptBlank(real.activeTabId());
-    else m.active = m.open[Math.min(idx, m.open.length - 1)];
+    else switchTo(m, real, m.open[Math.min(idx, m.open.length - 1)]);
   },
 });
 
@@ -159,8 +263,7 @@ const Cycle = cmd("Cycle", {
     if (m.open.length < 2) return;
     const n = m.open.length;
     const i = m.open.indexOf(m.active);
-    m.active = m.open[(i + dir + n) % n];
-    m.dirty = null;
+    switchTo(m, real, m.open[(i + dir + n) % n]);
   },
 });
 
@@ -171,8 +274,7 @@ const Reopen = cmd("Reopen", {
       const id = m.closed.pop();
       if (m.content.has(id) && !m.deleted.has(id)) {
         if (!m.open.includes(id)) m.open.push(id);
-        if (id !== m.active) m.dirty = null; // activating the active tab is a no-op, no flush
-        m.active = id;
+        switchTo(m, real, id);
         return;
       }
     }
@@ -182,20 +284,58 @@ const Reopen = cmd("Reopen", {
 const Type = cmd("Type", {
   run: async (m, real, text) => {
     await real.type(text);
+    lastEditAt = Date.now();
     m.content.set(m.active, text);
+    m.touch(m.active);
     m.dirty = m.active;
+    m.stale.delete(m.active); // typed over it: a real conflict now, judged at the next save
   },
 });
 
 const Wait = cmd("Wait", {
   run: async (m, real, ms) => {
     await sleep(ms);
-    if (ms > AUTOSAVE_MS) m.dirty = null;
+    await settle();
+    if (ms > AUTOSAVE_MS) flushed(m, real); // the autosave fired
+  },
+});
+
+const fresh = (m, id) =>
+  !m.stale.has(id) && id !== m.conflict && (m.dirty !== id || !m.file.has(id));
+
+const Rename = cmd("Rename", {
+  check: (m, [i]) => m.sidebar().length > 0 && fresh(m, pick(m, i)),
+  run: async (m, real, [i, name]) => {
+    const id = pick(m, i);
+    await real.contextMenu(id, "Rename…");
+    const input = document.getElementById("prompt-input");
+    input.value = name;
+    document.getElementById("prompt-ok").click();
+    await settle();
+    if (!name.trim()) return; // the prompt treats a blank name as cancel
+    m.title.set(id, name.trim());
+    m.touch(id);
+    // Renaming saves the draft as it is in memory, which flushes a pending edit.
+    if (m.dirty === id) flushed(m, real);
+    else wrote(m, real, id);
+  },
+});
+
+const Pin = cmd("Pin", {
+  check: (m, i) => m.sidebar().length > 0 && fresh(m, pick(m, i)),
+  run: async (m, real, i) => {
+    const id = pick(m, i);
+    await real.contextMenu(id, m.pinned.has(id) ? "Unpin" : "Pin");
+    if (m.pinned.has(id)) m.pinned.delete(id);
+    else m.pinned.add(id);
+    m.touch(id);
+    if (m.dirty === id) flushed(m, real);
+    else wrote(m, real, id);
   },
 });
 
 const Delete = cmd("Delete", {
-  check: (m) => m.content.get(m.active) !== "" && !m.deleted.has(m.active),
+  check: (m) => m.saved(m.active) && !m.deleted.has(m.active) && fresh(m, m.active),
   run: async (m, real) => {
     const id = m.active;
     await real.contextMenu(id, "Delete");
@@ -203,9 +343,9 @@ const Delete = cmd("Delete", {
     m.undoable.push(id);
     m.open = m.open.filter((t) => t !== id);
     m.closed = m.closed.filter((t) => t !== id);
-    m.dirty = null;
+    if (m.dirty === id) m.dirty = null;
     if (m.open.length === 0) m.adoptBlank(real.activeTabId());
-    else m.active = m.open[m.open.length - 1];
+    else switchTo(m, real, m.open[m.open.length - 1]);
   },
 });
 
@@ -218,6 +358,64 @@ const Undo = cmd("Undo", {
     const clicked = await real.clickToast("Undo");
     if (clicked) m.deleted.delete(id);
     else m.undoable = [];
+  },
+});
+
+/** Another program writes the file behind the file-backed draft. */
+const ExternalEdit = cmd("ExternalEdit", {
+  check: (m) => [...m.file.keys()].some((id) => !m.deleted.has(id)) && m.conflict === null,
+  run: async (m, real, text) => {
+    const id = [...m.file.keys()].find((x) => !m.deleted.has(x));
+    real.host.editOutside(m.file.get(id), text);
+    // Nothing in the app moves until it next reads that file (activate) or
+    // writes it (a save after a real edit, which then conflicts). Until then
+    // the memory copy is behind the file on purpose, and nothing is written.
+    if (m.dirty !== id) m.stale.add(id);
+  },
+});
+
+const Reload = cmd("Reload", {
+  check: (m) => m.conflict !== null,
+  run: async (m, real) => {
+    const id = m.conflict;
+    await real.clickToast("Reload");
+    m.reread(id, real);
+  },
+});
+
+const KeepMine = cmd("KeepMine", {
+  check: (m) => m.conflict !== null,
+  run: async (m, real) => {
+    const id = m.conflict;
+    await real.clickToast("Keep mine");
+    await settle();
+    m.conflict = null;
+    m.dirty = null; // written regardless of the mtime
+    wrote(m, real, id);
+  },
+});
+
+/** A sync lands a newer copy of one draft in the store, then the app is told. */
+const SyncChanged = cmd("SyncChanged", {
+  check: (m) =>
+    [...m.content.keys()].some(
+      (id) => !m.deleted.has(id) && !m.file.has(id) && m.content.get(id) !== "",
+    ),
+  run: async (m, real, i) => {
+    const ids = [...m.content.keys()].filter(
+      (id) => !m.deleted.has(id) && !m.file.has(id) && m.content.get(id) !== "",
+    );
+    const id = ids[i % ids.length];
+    const entry = real.host.store.get(id);
+    if (!entry) return; // not yet autosaved: nothing for a sync to update
+    const text = `synced ${m.clock}`;
+    real.host.store.set(id, { ...entry, content: text, updated_at: Date.now() + 1 });
+    await emit("sync:changed", null);
+    await settle();
+    await settle();
+    if (m.dirty === id) return; // typed text waiting for autosave wins over the pull
+    m.content.set(id, text);
+    m.touch(id);
   },
 });
 
@@ -238,8 +436,14 @@ const commands = [
     )
     .map((t) => new Type(t)),
   fc.constantFrom(0, 16, 450).map((ms) => new Wait(ms)),
+  fc.tuple(fc.nat(5), fc.constantFrom("Shopping", "  ", "notes", "")).map((a) => new Rename(a)),
+  fc.nat(5).map((i) => new Pin(i)),
   fc.constant(new Delete()),
   fc.constant(new Undo()),
+  fc.constantFrom("edited elsewhere", "another outside write").map((t) => new ExternalEdit(t)),
+  fc.constant(new Reload()),
+  fc.constant(new KeepMine()),
+  fc.nat(5).map((i) => new SyncChanged(i)),
 ];
 
 let real = null;
@@ -250,13 +454,15 @@ afterEach(() => {
 
 describe("random sessions", () => {
   it(
-    "keep the editor, tabs, sidebar and store in agreement after every step",
+    "keep the editor, tabs, sidebar, store and disk in agreement after every step",
     async () => {
       await fc.assert(
         fc.asyncProperty(fc.commands(commands, { size: "medium" }), async (cmds) => {
           const setup = async () => {
-            const drafts = seedDrafts();
-            real = await boot({ drafts });
+            const drain = AUTOSAVE_MS + 80 - (Date.now() - lastEditAt);
+            if (drain > 0) await sleep(drain); // let the previous session's autosave land
+            const { drafts, files } = seedDrafts();
+            real = await boot({ drafts, files });
             const model = new Model(drafts);
             model.adoptBlank(real.activeTabId());
             return { model, real };
@@ -265,8 +471,8 @@ describe("random sessions", () => {
         }),
         { numRuns: RUNS, verbose: true },
       );
-      // A session takes up to ~1.5 s (boot plus waits); scale the limit with the count.
     },
-    30_000 + RUNS * 2_000,
+    // A session takes up to ~3 s (boot, waits, the autosave drain); scale the limit with the count.
+    30_000 + RUNS * 4_000,
   );
 });

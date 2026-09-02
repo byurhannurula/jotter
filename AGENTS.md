@@ -50,11 +50,16 @@ Keep both green before committing. Three layers:
   connect. Never dispatch keyboard events on `document` from these tests; earlier
   module instances keep their listeners.
 - **Random sessions** in `src/app.random.test.js` (fast-check): random sequences of
-  open, close, cycle, reopen, type, delete, undo and pauses against the real app,
-  with an oracle checked after every step. Runs 8 sessions by default;
-  `JOTTER_FUZZ_RUNS=200 pnpm test -- app.random` for a deep run. A failure is
-  shrunk to the shortest sequence; add that sequence to `app.test.js` as a scripted
-  case next to the fix.
+  open, close, cycle, reopen, type, rename, pin, delete, undo, an outside edit to
+  the file-backed draft, Reload / Keep mine on the conflict toast, a sync landing,
+  and pauses, against the real app, with an oracle checked after every step
+  (editor text, tab list, sidebar order, store and disk copies, every save's
+  content, the conflict toast). Runs 6 sessions by default;
+  `JOTTER_FUZZ_RUNS=200 pnpm test -- app.random` for a deep run, and
+  `JOTTER_FUZZ_SEED=<n> JOTTER_FUZZ_PATH=<replayPath>` replays one reported
+  failure. A failure is shrunk to the shortest sequence; decide whether the app
+  or the model is wrong, then add the sequence to `app.test.js` as a scripted case
+  next to the fix.
 - **Rust** in `lib.rs` `mod tests`: store and atomic writes on a `TempDir`,
   `sync_core` against a wiremock server, path canonicalisation.
 
@@ -71,7 +76,10 @@ push. Release runs Rust on all three OSes.
   purpose; keep it organized by the existing section comments. Two rules that
   came from a data-loss bug: only `activate()` and `showInEditor()` change which
   draft the editor shows, and every read of `editor.value` that flows into a draft
-  goes through `editorTextFor(id)`.
+  goes through `editorTextFor(id)`. A third: only drafts in the `unsaved` set are
+  written by a flush, so switching tabs never rewrites a note nobody typed in
+  (a sync client would see an edit, and a file changed outside would raise a
+  conflict the user never caused).
 - `lib/tabs.js` — the tab model as pure transitions (`openInTab`, `closeTab`,
   `cycleTab`, `reopenClosedTab`, `removeDraftFromView`, `dropScratch`). `main.js`
   snapshots its globals, runs a transition, writes the result back, then does the

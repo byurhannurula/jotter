@@ -42,6 +42,13 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
     init_store: () => [...store.values()].map((d) => ({ ...d })),
     list_drafts: () => [...store.values()].map((d) => ({ ...d })),
     save_draft: ({ draft }) => {
+      // The Rust command refuses when the backing file changed underneath:
+      // two known mtimes that differ. A null recorded mtime means "write
+      // regardless" (Keep mine).
+      if (draft.file_path && draft.file_mtime != null) {
+        const now = mtimes.get(draft.file_path);
+        if (now != null && now !== draft.file_mtime) throw "conflict";
+      }
       saves.push({ id: draft.id, content: draft.content, file_path: draft.file_path });
       store.set(draft.id, { ...draft });
       if (draft.file_path) {
@@ -59,6 +66,11 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
       if (!disk.has(path)) throw new Error(`no such file: ${path}`);
       return [disk.get(path), mtimes.get(path) ?? null];
     },
+    write_conflict_copy: ({ path, contents }) => {
+      const copy = path.replace(/(\.[^./]+)?$/, " (conflicted copy)$1");
+      disk.set(copy, contents);
+      return copy;
+    },
     canonical_path: ({ path }) => path,
     take_opened_files: () => [],
     get_sync_config: () => ({ enabled: false, url: "", has_token: false }),
@@ -75,7 +87,13 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
     shouldMockEvents: true,
   });
 
-  return { store, disk, saves, deletes };
+  /** Simulate another program writing the file: new text, new mtime. */
+  const editOutside = (path, text) => {
+    disk.set(path, text);
+    mtimes.set(path, (mtimes.get(path) ?? 1000) + 1);
+  };
+
+  return { store, disk, mtimes, saves, deletes, editOutside };
 }
 
 /** Load a fresh main.js and run its init() against a fresh body.
