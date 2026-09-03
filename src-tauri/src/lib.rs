@@ -1777,6 +1777,30 @@ mod tests {
         assert!(!is_orphan(&draft("hello", None))); // has text
     }
 
+    /// Same cases as `isEmpty` in lib/text.test.js, from one file, so the
+    /// JS and Rust rules cannot drift apart without a suite going red.
+    #[test]
+    fn orphan_rule_matches_js_is_empty() {
+        #[derive(Deserialize)]
+        struct Case {
+            why: String,
+            content: String,
+            file_path: Option<String>,
+            title: String,
+            empty: bool,
+        }
+        let cases: Vec<Case> =
+            serde_json::from_str(include_str!("../../src/lib/empty-drafts.json")).unwrap();
+        assert!(cases.len() >= 6);
+        for c in cases {
+            let d = Draft {
+                title: c.title,
+                ..draft(&c.content, c.file_path.as_deref())
+            };
+            assert_eq!(is_orphan(&d), c.empty, "{}", c.why);
+        }
+    }
+
     #[test]
     fn file_gone_flags_missing_backing_files() {
         assert!(file_gone(&draft("note", Some("/no/such/path-xyz-123.txt"))));

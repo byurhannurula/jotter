@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import { boot, settle } from "./app-harness.js";
+import { boot, settle, sleep } from "./app-harness.js";
 
 const seed = () => ({
   drafts: [
@@ -347,6 +347,33 @@ describe("keyboard access", () => {
     await settle();
     expect(document.getElementById("context-menu")).toBeNull();
     expect(document.activeElement).toBe(row);
+  });
+
+  it("the quick switcher filters by text, Enter opens the pick, Escape hands focus back", async () => {
+    await app.clickDraft("draft-a");
+    await app.menu("switcher");
+    const input = document.getElementById("switcher-input");
+    expect(document.activeElement).toBe(input);
+    expect(document.querySelectorAll("#switcher-list .switcher-item").length).toBe(2);
+
+    input.value = "bravo";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const items = document.querySelectorAll("#switcher-list .switcher-item");
+    expect(items.length).toBe(1);
+    expect(items[0].dataset.id).toBe("draft-b");
+
+    key(input, "Enter");
+    await sleep(200); // the overlay fades for 160ms before it is hidden
+    expect(document.getElementById("switcher").hidden).toBe(true);
+    expect(app.activeTabId()).toBe("draft-b");
+    expect(app.editor.value).toBe("bravo text");
+
+    await app.menu("switcher");
+    key(document.getElementById("switcher-input"), "Escape");
+    await sleep(200);
+    expect(document.getElementById("switcher").hidden).toBe(true);
+    expect(document.activeElement).toBe(app.editor);
+    expect(app.editor.value).toBe("bravo text");
   });
 
   it("settings takes focus on open, keeps Tab inside, and gives focus back on close", async () => {

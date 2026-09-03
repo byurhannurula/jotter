@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import emptyCases from "./empty-drafts.json";
 import {
   baseName,
   firstLine,
@@ -85,6 +86,12 @@ describe("isEmpty", () => {
     // on the next launch would lose it.
     expect(isEmpty(d({ title: "Shopping" }))).toBe(false);
     expect(isEmpty(d({ title: "   " }))).toBe(true);
+  });
+
+  // The Rust side prunes with is_orphan on load; the same file feeds its test,
+  // so the two rules cannot drift apart without one suite going red.
+  it.each(emptyCases)("agrees with is_orphan: $why", (c) => {
+    expect(isEmpty(c)).toBe(c.empty);
   });
 });
 

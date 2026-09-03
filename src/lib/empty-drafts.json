@@ -1,0 +1,14 @@
+[
+  { "why": "nothing at all", "content": "", "file_path": null, "title": "", "empty": true },
+  {
+    "why": "whitespace only",
+    "content": "   \n\t ",
+    "file_path": null,
+    "title": "",
+    "empty": true
+  },
+  { "why": "blank title", "content": "", "file_path": null, "title": "   ", "empty": true },
+  { "why": "has text", "content": "hi", "file_path": null, "title": "", "empty": false },
+  { "why": "file-backed", "content": "", "file_path": "/tmp/a.txt", "title": "", "empty": false },
+  { "why": "named", "content": "", "file_path": null, "title": "Shopping", "empty": false }
+]
