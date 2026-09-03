@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import { boot, settle, sleep } from "./app-harness.js";
+import { boot, settle, sleep, AUTOSAVE_MS } from "./app-harness.js";
 
 const seed = () => ({
   drafts: [
@@ -440,6 +440,31 @@ describe("sync landing on the active draft", () => {
     expect(app.editor.value).toBe("typed, unsaved");
     await app.autosave();
     expect(app.host.store.get("draft-a").content).toBe("typed, unsaved");
+  });
+
+  it("is refused when the autosave lands while the pull's answer is in flight", async () => {
+    // The fuzzer's one unreproduced failure. A pull reads the store, the
+    // autosave writes it, then the pull's answer arrives. By then nothing is
+    // marked unsaved, so the stale snapshot looked adoptable and the remote
+    // text went over what had just been written.
+    await app.clickDraft("draft-a");
+    await app.type("typed text");
+    const read = app.host.handlers.list_drafts;
+    app.host.handlers.list_drafts = async () => {
+      const snapshot = read();
+      await sleep(AUTOSAVE_MS + 100);
+      return snapshot;
+    };
+    app.host.store.set("draft-a", {
+      ...app.host.store.get("draft-a"),
+      content: "from the cloud",
+      updated_at: Date.now() + 5,
+    });
+    await emit("sync:changed", null);
+    await sleep(AUTOSAVE_MS * 3);
+    await settle();
+    expect(app.host.store.get("draft-a").content).toBe("typed text");
+    expect(app.editor.value).toBe("typed text");
   });
 });
 

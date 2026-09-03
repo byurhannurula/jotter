@@ -107,7 +107,9 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
     mtimes.set(path, (mtimes.get(path) ?? 1000) + 1);
   };
 
-  return { store, disk, mtimes, saves, deletes, events, editOutside };
+  // `handlers` is exposed so a test can wrap one command, e.g. to give
+  // list_drafts the latency a real IPC round trip has.
+  return { store, disk, mtimes, saves, deletes, events, editOutside, handlers };
 }
 
 /** Load a fresh main.js and run its init() against a fresh body.

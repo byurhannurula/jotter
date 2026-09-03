@@ -507,6 +507,7 @@ function togglePreview() {
  */
 /** In-flight save per draft id, so two never overlap. */
 const saving = new Map();
+let saveSeq = 0; // bumped as each write starts, so a sync pull can notice one
 
 /** Ids with edits the store has not seen. Every tab switch flushes, and
  *  flushing a draft nobody typed in rewrote its JSON and its text file for
@@ -539,6 +540,7 @@ async function writeDraft(d, { sync = true } = {}) {
   // Here rather than in persist(): a rename or a pin writes the draft too,
   // and must count as "nothing unsaved" for the next sync pull.
   unsaved.delete(d.id);
+  saveSeq += 1;
   try {
     // The command hands back the backing file's mtime so the next save can tell
     // whether anything else has written to it.
@@ -2237,11 +2239,23 @@ function renderSyncSection() {
 // clobbering what the user is actively editing. Conservative on deletes: only
 // drops pure in-app drafts (no file_path) that vanished from the store.
 async function refreshFromSync() {
+  // The pull answers with a snapshot of the store. A save that starts while
+  // that answer is in flight lands after the snapshot was taken, and by the
+  // time the answer arrives nothing is marked unsaved any more, so the stale
+  // snapshot would look adoptable and put the remote text over what was just
+  // written. Read again until no save started during the read; give up after
+  // a few tries and let the next sync tick try again.
   let list;
-  try {
-    list = await invoke("list_drafts");
-  } catch {
-    return;
+  for (let tries = 0; ; tries += 1) {
+    if (tries === 3) return;
+    const seq = saveSeq;
+    await Promise.allSettled([...saving.values()]);
+    try {
+      list = await invoke("list_drafts");
+    } catch {
+      return;
+    }
+    if (seq === saveSeq) break;
   }
   // A soft-deleted draft is gone from the model but its file lingers on disk for
   // the ~6s undo grace window. Without this, a sync landing in that window sees the
