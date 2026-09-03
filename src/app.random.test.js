@@ -20,6 +20,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import fc from "fast-check";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
+import { findMatches } from "./lib/text.js";
 import { boot, sleep, settle, AUTOSAVE_MS } from "./app-harness.js";
 
 const RUNS = Number(process.env.JOTTER_FUZZ_RUNS) || 6;
@@ -71,6 +72,8 @@ class Model {
     this.dirty = null; // id with an autosave pending
     this.conflict = null; // file draft whose save was refused; toast is up
     this.stale = new Set(); // file drafts whose memory copy is behind the file
+    this.preview = new Set(); // tabs showing the markdown preview instead of the editor
+    this.focus = false; // focus mode on
     // The mtime the app believes each file has: set on read and on a
     // successful write. A save compares it with the real one.
     this.knownMtime = new Map(drafts.filter((d) => d.file_path).map((d) => [d.id, d.file_mtime]));
@@ -274,6 +277,7 @@ const CloseTab = cmd("CloseTab", {
       m.content.delete(id); // pruned from the store
     } else {
       m.closed.push(id);
+      m.preview.delete(id); // a closed tab forgets its preview
     }
     if (m.open.length === 0) m.adoptBlank(real.activeTabId());
     else switchTo(m, real, m.open[Math.min(idx, m.open.length - 1)]);
@@ -305,6 +309,7 @@ const Reopen = cmd("Reopen", {
 });
 
 const Type = cmd("Type", {
+  check: (m) => !m.preview.has(m.active), // the editor is hidden behind the preview
   run: async (m, real, text) => {
     await real.type(text);
     lastEditAt = Date.now();
@@ -367,6 +372,7 @@ const Delete = cmd("Delete", {
     const id = m.active;
     await real.contextMenu(id, "Delete");
     m.deleted.add(id);
+    m.preview.delete(id);
     m.undoable.push(id);
     m.open = m.open.filter((t) => t !== id);
     m.closed = m.closed.filter((t) => t !== id);
@@ -447,6 +453,78 @@ const SyncChanged = cmd("SyncChanged", {
   },
 });
 
+/** Quick Open: pick the i-th row. Its order is the sidebar's. */
+const Switcher = cmd("Switcher", {
+  run: async (m, real, i) => {
+    await real.menu("switcher");
+    const rows = m.sidebar();
+    if (rows.length === 0) return; // "No drafts to open yet" toast, nothing opens
+    const input = document.getElementById("switcher-input");
+    const id = rows[i % rows.length];
+    for (let k = 0; k < i % rows.length; k += 1) {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    }
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+    if (!m.open.includes(id)) m.open.push(id);
+    switchTo(m, real, id);
+  },
+});
+
+/** Find bar, Replace All, close: an edit made without a keystroke in the
+ *  editor, so it must still mark the draft unsaved and autosave. */
+const ReplaceAll = cmd("ReplaceAll", {
+  check: (m) => !m.preview.has(m.active),
+  run: async (m, real, [from, to]) => {
+    await real.menu("find");
+    const findInput = document.getElementById("find-input");
+    findInput.value = from;
+    findInput.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("replace-input").value = to;
+    document.getElementById("replace-all").click();
+    document.getElementById("find-close").click();
+    await settle();
+    const text = m.content.get(m.active);
+    const hits = findMatches(text, from);
+    if (!hits.length) return;
+    let out = text;
+    for (let k = hits.length - 1; k >= 0; k -= 1) {
+      const [a, b] = hits[k];
+      out = out.slice(0, a) + to + out.slice(b);
+    }
+    lastEditAt = Date.now();
+    m.content.set(m.active, out);
+    m.touch(m.active);
+    m.dirty = m.active;
+    m.stale.delete(m.active);
+  },
+});
+
+/** Markdown preview on the active tab. Typing is impossible while it is on. */
+const Preview = cmd("Preview", {
+  run: async (m, real) => {
+    await real.menu("toggle_preview");
+    if (m.preview.has(m.active)) m.preview.delete(m.active);
+    else m.preview.add(m.active);
+    const editor = document.getElementById("editor");
+    expect(editor.hidden).toBe(m.preview.has(m.active));
+  },
+});
+
+/** Focus mode, through the menu. The toggle is debounced at 400ms, so the
+ *  command waits that out before the next one can toggle again. The wait is
+ *  well past the autosave's 400ms too, so the wrapper can tell a save that
+ *  fired during it from one that did not (its margin is 40ms). */
+const FocusMode = cmd("FocusMode", {
+  run: async (m) => {
+    await real.menu("focus_mode");
+    m.focus = !m.focus;
+    await sleep(520);
+    await settle();
+    expect(document.body.classList.contains("focus-mode")).toBe(m.focus);
+  },
+});
+
 const commands = [
   fc.nat(5).map((i) => new ClickDraft(i)),
   fc.constant(new NewTab()),
@@ -472,6 +550,12 @@ const commands = [
   fc.constant(new Reload()),
   fc.constant(new KeepMine()),
   fc.nat(5).map((i) => new SyncChanged(i)),
+  fc.nat(5).map((i) => new Switcher(i)),
+  fc
+    .tuple(fc.constantFrom("x", "text", "lines", "note", "  "), fc.constantFrom("", "y", "TEXT"))
+    .map((a) => new ReplaceAll(a)),
+  fc.constant(new Preview()),
+  fc.constant(new FocusMode()),
 ];
 
 let real = null;
