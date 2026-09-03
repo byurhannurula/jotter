@@ -23,7 +23,7 @@ import { dirName, tildePath, shortPath } from "./lib/paths.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
 import * as tabModel from "./lib/tabs.js";
-import { tabKeyAction } from "./lib/keys.js";
+import { tabKeyAction, shortcutOf } from "./lib/keys.js";
 import * as modals from "./lib/modals.js";
 import {
   TOKEN_MASK,
@@ -3094,51 +3094,40 @@ async function init() {
     renderList();
   });
 
-  // Tab cycling lives here, not on a native menu accelerator: Tab-based
-  // accelerators (Control+Tab) don't fire reliably on macOS.
+  // Chords the page owns (see CHORDS in lib/keys.js for why they are not menu
+  // accelerators). Draft actions are inert while a modal is open so they do
+  // not act on a draft hidden behind it.
   document.addEventListener("keydown", (e) => {
-    if (e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab") {
+    const action = shortcutOf(e);
+    if (!action) return;
+    if (action === "cycle-next" || action === "cycle-prev") {
       e.preventDefault();
-      cycleTab(e.shiftKey ? -1 : 1);
+      cycleTab(action === "cycle-next" ? 1 : -1);
+      return;
     }
-  });
-
-  // ⌃⌘F is on the View menu too, but macOS has owned that chord for Enter Full
-  // Screen for years and can swallow it before the menu item sees it. Handling
-  // it here as well means the key works either way — and ⇧⌘F is a second,
-  // unreserved way in for when the system wins.
-  document.addEventListener("keydown", (e) => {
-    if (e.altKey || e.code !== "KeyF") return;
-    const ctrlCmd = e.ctrlKey && e.metaKey && !e.shiftKey;
-    const shiftCmd = e.metaKey && e.shiftKey && !e.ctrlKey;
-    if (!ctrlCmd && !shiftCmd) return;
-    e.preventDefault();
-    requestFocusToggle();
-  });
-
-  // Draft-action accelerators (mirrored as hints in the context menu). All act on
-  // the active draft. Keyed off e.code so they're layout- and case-independent, and
-  // inert while a modal is open so they don't act on a draft hidden behind it.
-  document.addEventListener("keydown", (e) => {
-    if (!e.metaKey || e.altKey || anyModalOpen()) return;
+    if (action === "focus-mode") {
+      e.preventDefault();
+      requestFocusToggle();
+      return;
+    }
+    if (anyModalOpen()) return;
     const id = currentId;
     const d = drafts.get(id);
     const saved = !!d && isSaved(d);
-    if (e.shiftKey && !e.ctrlKey && e.code === "KeyL") {
-      // ⇧⌘L — Share, or copy the link if already shared.
+    if (action === "share") {
       e.preventDefault();
       if (cloudConfigured && saved) {
         if (sharedById.has(id)) copyText(sharedById.get(id).url, "Link copied");
         else shareDraft(id);
       }
-    } else if (e.shiftKey && !e.ctrlKey && e.code === "KeyE") {
-      e.preventDefault(); // ⇧⌘E — Export
+    } else if (action === "export") {
+      e.preventDefault();
       if (saved) exportDraft(id);
-    } else if (e.ctrlKey && !e.shiftKey && e.code === "KeyP") {
-      e.preventDefault(); // ⌃⌘P — Pin / Unpin
+    } else if (action === "pin") {
+      e.preventDefault();
       if (saved) togglePin(id);
-    } else if (!e.shiftKey && !e.ctrlKey && (e.code === "Backspace" || e.code === "Delete")) {
-      // ⌘⌫ — Delete. Never hijack a text field: there ⌘⌫ means delete-to-line-start.
+    } else if (action === "delete") {
+      // Never hijack a text field: there ⌘⌫ means delete-to-line-start.
       if (isEditableFocused()) return;
       if (saved) {
         e.preventDefault();

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tabKeyAction } from "./keys.js";
+import { tabKeyAction, shortcutOf, CHORDS } from "./keys.js";
 
 const key = (k, mods = {}) => ({
   key: k,
@@ -76,5 +76,44 @@ describe("tabKeyAction", () => {
 
   it("still escapes when the setting already hands Tab over", () => {
     expect(sequence([key("Escape"), key("Tab")], "off")).toEqual(["arm", "release"]);
+  });
+});
+
+describe("shortcutOf", () => {
+  const chord = (mods, k) => ({ key: k.key ?? "x", code: k.code ?? "", ...mods });
+  const meta = { metaKey: true };
+  const metaShift = { metaKey: true, shiftKey: true };
+  const metaCtrl = { metaKey: true, ctrlKey: true };
+
+  it("maps each chord to its action", () => {
+    expect(shortcutOf(chord({ ctrlKey: true }, { key: "Tab" }))).toBe("cycle-next");
+    expect(shortcutOf(chord({ ctrlKey: true, shiftKey: true }, { key: "Tab" }))).toBe("cycle-prev");
+    expect(shortcutOf(chord(metaCtrl, { code: "KeyF" }))).toBe("focus-mode");
+    expect(shortcutOf(chord(metaShift, { code: "KeyF" }))).toBe("focus-mode");
+    expect(shortcutOf(chord(metaShift, { code: "KeyL" }))).toBe("share");
+    expect(shortcutOf(chord(metaShift, { code: "KeyE" }))).toBe("export");
+    expect(shortcutOf(chord(metaCtrl, { code: "KeyP" }))).toBe("pin");
+    expect(shortcutOf(chord(meta, { code: "Backspace" }))).toBe("delete");
+    expect(shortcutOf(chord(meta, { code: "Delete" }))).toBe("delete");
+  });
+
+  it("needs the exact modifiers", () => {
+    expect(shortcutOf(chord({ metaKey: true }, { key: "Tab" }))).toBeNull();
+    expect(shortcutOf(chord({ ctrlKey: true, altKey: true }, { key: "Tab" }))).toBeNull();
+    expect(
+      shortcutOf(chord({ metaKey: true, ctrlKey: true, shiftKey: true }, { code: "KeyF" })),
+    ).toBeNull();
+    expect(shortcutOf(chord(meta, { code: "KeyL" }))).toBeNull(); // ⌘L alone is not share
+    expect(shortcutOf(chord(metaShift, { code: "KeyP" }))).toBeNull(); // ⇧⌘P is the menu's preview
+    expect(shortcutOf(chord({}, { code: "Backspace" }))).toBeNull();
+  });
+
+  it("matches on code, not the typed character", () => {
+    expect(shortcutOf({ key: "ł", code: "KeyL", ...metaShift })).toBe("share");
+  });
+
+  it("has no two chords with the same keys", () => {
+    const sig = (c) => [c.key, c.code, !!c.meta, !!c.ctrl, !!c.shift, !!c.alt].join("|");
+    expect(new Set(CHORDS.map(sig)).size).toBe(CHORDS.length);
   });
 });
