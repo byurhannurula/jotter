@@ -2113,6 +2113,55 @@ mod tests {
         }
     }
 
+    /// The Shortcuts help list in main.js is typed by hand. Read every
+    /// accelerator this file gives a menu item (`Some("CmdOrCtrl+...")`) and
+    /// check the list shows it, so a changed or added shortcut cannot leave
+    /// the help page stale.
+    #[test]
+    fn every_menu_accelerator_is_in_the_shortcuts_list() {
+        let main_js = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/main.js"))
+            .expect("src/main.js next to src-tauri");
+        let list_start = main_js
+            .find("const SHORTCUTS = [")
+            .expect("SHORTCUTS in main.js");
+        let list = &main_js[list_start..];
+        let list = &list[..list.find("\n];").expect("end of SHORTCUTS")];
+
+        let src = include_str!("lib.rs");
+        let mut found = 0;
+        for piece in src.split("Some(\"").skip(1) {
+            let accel = &piece[..piece.find('"').unwrap()];
+            let real = accel
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == ',');
+            if !accel.contains("CmdOrCtrl") || !real {
+                continue; // prose, like the one in this test's own doc comment
+            }
+            found += 1;
+            let symbols = accel_symbols(accel);
+            assert!(
+                list.contains(&symbols),
+                "menu accelerator {accel} ({symbols}) is not in SHORTCUTS"
+            );
+        }
+        assert!(found >= 10, "expected the menu accelerators, found {found}");
+    }
+
+    /// `Shift+CmdOrCtrl+S` -> `⇧⌘S`, the way SHORTCUTS writes them.
+    fn accel_symbols(accel: &str) -> String {
+        let mut out = String::new();
+        for part in accel.split('+') {
+            out.push_str(match part {
+                "Shift" => "⇧",
+                "Ctrl" | "Control" => "⌃",
+                "Alt" | "Option" => "⌥",
+                "CmdOrCtrl" | "Cmd" | "Super" => "⌘",
+                key => key,
+            });
+        }
+        out
+    }
+
     #[test]
     fn conflict_copy_sits_beside_the_original() {
         assert_eq!(

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { tabKeyAction, shortcutOf, CHORDS } from "./keys.js";
 
 const key = (k, mods = {}) => ({
@@ -110,6 +111,22 @@ describe("shortcutOf", () => {
 
   it("matches on code, not the typed character", () => {
     expect(shortcutOf({ key: "ł", code: "KeyL", ...metaShift })).toBe("share");
+  });
+
+  it("is shown in the Shortcuts help list in main.js", () => {
+    const main = readFileSync(new URL("../main.js", import.meta.url), "utf8");
+    const start = main.indexOf("const SHORTCUTS = [");
+    const list = main.slice(start, main.indexOf("\n];", start));
+    const symbol = (c) => {
+      const key = c.code ? c.code.replace(/^Key/, "") : c.key;
+      if (key === "Delete") return null; // the forward-delete alias of ⌘⌫
+      const shown = { Backspace: "⌫" }[key] ?? key;
+      return `${c.ctrl ? "⌃" : ""}${c.shift ? "⇧" : ""}${c.meta ? "⌘" : ""}${shown}`;
+    };
+    for (const c of CHORDS) {
+      const s = symbol(c);
+      if (s) expect(list, `${c.id} shown as ${s}`).toContain(s);
+    }
   });
 
   it("has no two chords with the same keys", () => {

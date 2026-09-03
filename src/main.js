@@ -20,6 +20,7 @@ import {
   countWords,
 } from "./lib/text.js";
 import { dirName, tildePath, shortPath } from "./lib/paths.js";
+import { el } from "./lib/dom.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
 import * as tabModel from "./lib/tabs.js";
@@ -187,48 +188,33 @@ function draftSubText(d) {
 }
 
 function makeItem(d) {
-  const li = document.createElement("li");
-  li.className = "draft-item" + (d.id === currentId ? " active" : "") + (d.pinned ? " pinned" : "");
-  li.dataset.id = d.id;
-  li.title = draftTooltip(d);
-  li.setAttribute("role", "option");
-  li.setAttribute("aria-selected", String(d.id === currentId));
-  li.tabIndex = d.id === currentId ? 0 : -1; // roving: see roveRows()
-
-  const icon = document.createElement("span");
-  icon.className = "draft-icon";
-  icon.innerHTML = d.file_path ? ICON_FILE : ICON_DRAFT;
-
-  const body = document.createElement("div");
-  body.className = "draft-body";
-
-  const title = document.createElement("div");
-  title.className = "draft-title";
-  title.textContent = draftTitle(d);
-
-  const sub = document.createElement("div");
-  sub.className = "draft-sub";
-  const preview = document.createElement("span");
-  preview.className = "preview";
-  preview.textContent = draftSubText(d);
-  sub.append(preview);
-  body.append(title, sub);
-
-  // Right column: status markers (top) over the timestamp (bottom).
-  const aside = document.createElement("div");
-  aside.className = "draft-aside";
-  const marks = document.createElement("span");
-  marks.className = "draft-marks";
-  marks.innerHTML = draftMarksHtml(d.id);
-  const time = document.createElement("span");
-  time.className = "time";
-  time.textContent = relTime(d.updated_at);
-  aside.append(marks, time);
-
-  li.append(icon, body, aside);
-  li.addEventListener("click", () => openInTab(d.id));
-  li.addEventListener("contextmenu", (e) => openDraftMenu(e, d.id));
-  return li;
+  const active = d.id === currentId;
+  return el(
+    "li",
+    {
+      class: "draft-item" + (active ? " active" : "") + (d.pinned ? " pinned" : ""),
+      data: { id: d.id },
+      title: draftTooltip(d),
+      role: "option",
+      aria: { selected: String(active) },
+      tabIndex: active ? 0 : -1, // roving: see roveRows()
+      on: { click: () => openInTab(d.id), contextmenu: (e) => openDraftMenu(e, d.id) },
+    },
+    el("span", { class: "draft-icon", html: d.file_path ? ICON_FILE : ICON_DRAFT }),
+    el(
+      "div",
+      { class: "draft-body" },
+      el("div", { class: "draft-title", text: draftTitle(d) }),
+      el("div", { class: "draft-sub" }, el("span", { class: "preview", text: draftSubText(d) })),
+    ),
+    // Right column: status markers (top) over the timestamp (bottom).
+    el(
+      "div",
+      { class: "draft-aside" },
+      el("span", { class: "draft-marks", html: draftMarksHtml(d.id) }),
+      el("span", { class: "time", text: relTime(d.updated_at) }),
+    ),
+  );
 }
 
 // The status-glyph markup for a row: pin (pinned) + cloud (synced) + link (shared).
@@ -283,10 +269,12 @@ function renderList() {
 
   const items = orderedDrafts().filter((d) => isSaved(d) && matchesSearch(d));
   if (items.length === 0) {
-    const empty = document.createElement("li");
-    empty.className = "draft-empty";
-    empty.textContent = searchQuery ? "No matching drafts" : "No saved drafts yet";
-    listEl.append(empty);
+    listEl.append(
+      el("li", {
+        class: "draft-empty",
+        text: searchQuery ? "No matching drafts" : "No saved drafts yet",
+      }),
+    );
     return;
   }
   for (const d of items) {
@@ -338,32 +326,34 @@ function renderTabs() {
   for (const id of openTabs) {
     const d = drafts.get(id);
     if (!d) continue;
-    const tab = document.createElement("div");
-    tab.className = "tab" + (id === currentId ? " active" : "");
-    tab.dataset.id = id;
-    tab.setAttribute("role", "tab");
-    tab.setAttribute("aria-selected", String(id === currentId));
-    tab.tabIndex = id === currentId ? 0 : -1; // roving: arrows move between tabs
-
-    const title = document.createElement("span");
-    title.className = "tab-title";
-    title.textContent = draftTitle(d);
-
-    const close = document.createElement("button");
-    close.className = "tab-close";
-    close.innerHTML = ICON_CLOSE;
-    close.title = "Close tab (⌘W)";
-    close.setAttribute("aria-label", "Close tab");
-    close.tabIndex = -1; // ⌘W and Backspace on the tab do this from the keyboard
-    close.addEventListener("click", (e) => {
-      e.stopPropagation();
-      closeTab(id);
-    });
-
-    tab.append(title, close);
-    tab.addEventListener("click", () => activate(id));
-    tab.addEventListener("contextmenu", (e) => openDraftMenu(e, id));
-    tabsEl.append(tab);
+    const active = id === currentId;
+    tabsEl.append(
+      el(
+        "div",
+        {
+          class: "tab" + (active ? " active" : ""),
+          data: { id },
+          role: "tab",
+          aria: { selected: String(active) },
+          tabIndex: active ? 0 : -1, // roving: arrows move between tabs
+          on: { click: () => activate(id), contextmenu: (e) => openDraftMenu(e, id) },
+        },
+        el("span", { class: "tab-title", text: draftTitle(d) }),
+        el("button", {
+          class: "tab-close",
+          html: ICON_CLOSE,
+          title: "Close tab (⌘W)",
+          aria: { label: "Close tab" },
+          tabIndex: -1, // ⌘W and Backspace on the tab do this from the keyboard
+          on: {
+            click: (e) => {
+              e.stopPropagation();
+              closeTab(id);
+            },
+          },
+        }),
+      ),
+    );
   }
 }
 
@@ -1513,41 +1503,30 @@ function sectionEl(section) {
 
 function settingRow(name) {
   const cfg = SETTINGS[name];
-  const row = document.createElement("div");
-  row.className = "setting-row";
-  row.dataset.setting = name;
-  const label = document.createElement("span");
-  label.className = "setting-label";
-  label.textContent = cfg.label;
   // The row is space-between, so the label and its info icon share one child
   // slot and the control keeps the far edge.
-  const labelWrap = document.createElement("span");
-  labelWrap.className = "label-wrap";
-  labelWrap.append(label);
+  const labelWrap = el(
+    "span",
+    { class: "label-wrap" },
+    el("span", { class: "setting-label", text: cfg.label }),
+  );
   if (cfg.note) labelWrap.append(infoButton(cfg.note));
-  row.append(labelWrap);
-
-  if (cfg.control === "toggle") {
-    const sw = document.createElement("button");
-    sw.className = "switch interactive";
-    sw.id = `set-${name}`;
-    sw.setAttribute("role", "switch");
-    sw.addEventListener("click", () => setSetting(name, getSetting(name) === "on" ? "off" : "on"));
-    row.append(sw);
-  } else {
-    const seg = document.createElement("div");
-    seg.className = "seg";
-    seg.id = `set-${name}`;
-    for (const [val, text] of cfg.options) {
-      const b = document.createElement("button");
-      b.dataset.val = val;
-      b.textContent = text;
-      b.addEventListener("click", () => setSetting(name, val));
-      seg.append(b);
-    }
-    row.append(seg);
-  }
-  return row;
+  const control =
+    cfg.control === "toggle"
+      ? el("button", {
+          class: "switch interactive",
+          id: `set-${name}`,
+          role: "switch",
+          on: { click: () => setSetting(name, getSetting(name) === "on" ? "off" : "on") },
+        })
+      : el(
+          "div",
+          { class: "seg", id: `set-${name}` },
+          ...cfg.options.map(([val, text]) =>
+            el("button", { data: { val }, text, on: { click: () => setSetting(name, val) } }),
+          ),
+        );
+  return el("div", { class: "setting-row", data: { setting: name } }, labelWrap, control);
 }
 
 /* ---- Tooltips ----------------------------------------------------------
@@ -1559,9 +1538,7 @@ let tipEl = null;
 
 function showTip(anchor, text) {
   if (!tipEl) {
-    tipEl = document.createElement("div");
-    tipEl.className = "tip";
-    tipEl.setAttribute("role", "tooltip");
+    tipEl = el("div", { class: "tip", role: "tooltip" });
     document.body.append(tipEl);
   }
   tipEl.textContent = text;
@@ -1586,55 +1563,38 @@ function hideTip() {
 
 /** A small circled "i" that reveals `text` on hover or keyboard focus. */
 function infoButton(text) {
-  const btn = document.createElement("button");
-  btn.className = "info-btn";
-  btn.type = "button";
-  btn.textContent = "i";
-  btn.setAttribute("aria-label", "More about this setting");
   // The note is a description, not a name — a screen reader should announce the
   // setting's own label first, then this.
   const tipId = `tip-${(infoButton.n = (infoButton.n || 0) + 1)}`;
-  const desc = document.createElement("span");
-  desc.id = tipId;
-  desc.className = "sr-only";
-  desc.textContent = text;
-  btn.setAttribute("aria-describedby", tipId);
-  btn.append(desc);
-  btn.addEventListener("mouseenter", () => showTip(btn, text));
-  btn.addEventListener("focus", () => showTip(btn, text));
-  btn.addEventListener("mouseleave", hideTip);
-  btn.addEventListener("blur", hideTip);
-  // Tapping it should not look like a dead control.
-  btn.addEventListener("click", (e) => {
-    e.preventDefault();
-    showTip(btn, text);
-  });
+  const btn = el(
+    "button",
+    {
+      class: "info-btn",
+      type: "button",
+      text: "i",
+      aria: { label: "More about this setting", describedby: tipId },
+      on: {
+        mouseenter: () => showTip(btn, text),
+        focus: () => showTip(btn, text),
+        mouseleave: hideTip,
+        blur: hideTip,
+        // Tapping it should not look like a dead control.
+        click: (e) => {
+          e.preventDefault();
+          showTip(btn, text);
+        },
+      },
+    },
+    el("span", { id: tipId, class: "sr-only", text }),
+  );
   return btn;
 }
 
 // Grouped-card building blocks (macOS-settings style).
-function groupTitle(text) {
-  const el = document.createElement("div");
-  el.className = "settings-group-title";
-  el.textContent = text;
-  return el;
-}
-function groupCard() {
-  const el = document.createElement("div");
-  el.className = "settings-group";
-  return el;
-}
-function groupRow() {
-  const el = document.createElement("div");
-  el.className = "group-row";
-  return el;
-}
-function rowLabel(text) {
-  const el = document.createElement("span");
-  el.className = "group-label";
-  el.textContent = text;
-  return el;
-}
+const groupTitle = (text) => el("div", { class: "settings-group-title", text });
+const groupCard = () => el("div", { class: "settings-group" });
+const groupRow = () => el("div", { class: "group-row" });
+const rowLabel = (text) => el("span", { class: "group-label", text });
 
 /* ---- Drafts folder ------------------------------------------------------
    Moving the store is what lets someone put it in a Syncthing/Dropbox folder and
@@ -1712,58 +1672,47 @@ function renderStorageSection() {
   // together below, rather than spread across the card by the row's own
   // space-between.
   const row = groupRow();
-  const path = document.createElement("span");
-  path.id = "drafts-dir-path";
-  path.className = "path-value";
-
-  const choose = document.createElement("button");
-  choose.className = "prompt-btn sync-btn";
-  choose.textContent = "Choose…";
-  choose.addEventListener("click", chooseDraftsDir);
-
-  row.append(rowLabel("Location"), path, choose);
+  row.append(
+    rowLabel("Location"),
+    el("span", { id: "drafts-dir-path", class: "path-value" }),
+    el("button", { class: "prompt-btn sync-btn", text: "Choose…", on: { click: chooseDraftsDir } }),
+  );
   card.append(row);
 
-  const actions = groupRow();
-  const group = document.createElement("div");
-  group.className = "btn-group";
-
-  const show = document.createElement("button");
-  show.className = "prompt-btn sync-btn";
-  show.textContent = "Show in Finder";
-  show.addEventListener("click", async () => {
-    // The Rust side knows the folder and opens it there: the webview's openPath
-    // is scope-checked and would need a wildcard path grant to work at all.
-    try {
-      await invoke("open_drafts_dir");
-    } catch (err) {
-      console.error("open_drafts_dir failed:", err);
-      showToast("Couldn't open the drafts folder");
-    }
+  const show = el("button", {
+    class: "prompt-btn sync-btn",
+    text: "Show in Finder",
+    on: {
+      click: async () => {
+        // The Rust side knows the folder and opens it there: the webview's openPath
+        // is scope-checked and would need a wildcard path grant to work at all.
+        try {
+          await invoke("open_drafts_dir");
+        } catch (err) {
+          console.error("open_drafts_dir failed:", err);
+          showToast("Couldn't open the drafts folder");
+        }
+      },
+    },
   });
-
-  const reset = document.createElement("button");
-  reset.id = "drafts-dir-reset";
-  reset.className = "prompt-btn sync-btn";
-  reset.textContent = "Use default";
-  reset.disabled = true;
-  reset.addEventListener("click", () => moveDraftsDir(null));
-
-  group.append(show, reset);
-  actions.append(group);
+  const reset = el("button", {
+    id: "drafts-dir-reset",
+    class: "prompt-btn sync-btn",
+    text: "Use default",
+    disabled: true,
+    on: { click: () => moveDraftsDir(null) },
+  });
+  const actions = groupRow();
+  actions.append(el("div", { class: "btn-group" }, show, reset));
   card.append(actions);
 
-  const warning = document.createElement("div");
-  warning.id = "drafts-dir-warning";
-  warning.className = "settings-note is-warning";
-  warning.hidden = true;
-  card.append(warning);
-
-  const note = document.createElement("div");
-  note.className = "settings-note";
-  note.textContent =
-    "Drafts move with it. Point it at a synced folder — Syncthing, iCloud Drive, Dropbox — to keep two Macs in step without the cloud Worker.";
-  card.append(note);
+  card.append(
+    el("div", { id: "drafts-dir-warning", class: "settings-note is-warning", hidden: true }),
+    el("div", {
+      class: "settings-note",
+      text: "Drafts move with it. Point it at a synced folder — Syncthing, iCloud Drive, Dropbox — to keep two Macs in step without the cloud Worker.",
+    }),
+  );
 
   host.append(card);
   refreshDraftsDir();
@@ -1773,17 +1722,16 @@ function renderShortcutsSection() {
   const host = sectionEl("shortcuts");
   host.replaceChildren();
   for (const [group, rows] of SHORTCUTS) {
-    const h = document.createElement("div");
-    h.className = "shortcut-group";
-    h.textContent = group;
-    host.append(h);
+    host.append(el("div", { class: "shortcut-group", text: group }));
     for (const [keys, action] of rows) {
-      const r = document.createElement("div");
-      r.className = "shortcut-row";
-      r.innerHTML = `<span class="shortcut-action"></span><kbd class="shortcut-keys"></kbd>`;
-      r.querySelector(".shortcut-action").textContent = action;
-      r.querySelector(".shortcut-keys").textContent = keys;
-      host.append(r);
+      host.append(
+        el(
+          "div",
+          { class: "shortcut-row" },
+          el("span", { class: "shortcut-action", text: action }),
+          el("kbd", { class: "shortcut-keys", text: keys }),
+        ),
+      );
     }
   }
 }
@@ -1838,8 +1786,7 @@ function renderAboutSection() {
   const host = sectionEl("about");
   host.replaceChildren();
 
-  const hero = document.createElement("div");
-  hero.className = "about-hero";
+  const hero = el("div", { class: "about-hero" });
   hero.innerHTML = `
     <button class="about-icon" id="about-icon" aria-label="${APP.name}">
       <svg viewBox="0 0 64 64" width="54" height="54" aria-hidden="true">
@@ -1861,29 +1808,33 @@ function renderAboutSection() {
   host.append(groupTitle("Updates"));
   const updates = groupCard();
 
-  const autoRow = groupRow();
-  autoRow.append(rowLabel("Automatically check for updates"));
-  const toggle = document.createElement("button");
-  toggle.className = "switch interactive";
-  toggle.setAttribute("role", "switch");
+  const toggle = el("button", {
+    class: "switch interactive",
+    role: "switch",
+    on: {
+      click: () => {
+        localStorage.setItem("set-autoupdate", autoUpdateOn() ? "off" : "on");
+        syncToggle();
+      },
+    },
+  });
   const syncToggle = () => {
     const on = autoUpdateOn();
     toggle.classList.toggle("on", on);
     toggle.setAttribute("aria-checked", on ? "true" : "false");
   };
-  toggle.addEventListener("click", () => {
-    localStorage.setItem("set-autoupdate", autoUpdateOn() ? "off" : "on");
-    syncToggle();
-  });
   syncToggle();
-  autoRow.append(toggle);
+  const autoRow = groupRow();
+  autoRow.append(rowLabel("Automatically check for updates"), toggle);
 
   const checkRow = groupRow();
-  const checkBtn = document.createElement("button");
-  checkBtn.className = "group-link";
-  checkBtn.textContent = "Check for updates…";
-  checkBtn.addEventListener("click", () => checkForUpdates());
-  checkRow.append(checkBtn);
+  checkRow.append(
+    el("button", {
+      class: "group-link",
+      text: "Check for updates…",
+      on: { click: () => checkForUpdates() },
+    }),
+  );
 
   updates.append(autoRow, checkRow);
   host.append(updates);
@@ -1895,12 +1846,14 @@ function renderAboutSection() {
   byRow.append(rowLabel(`Built by ${APP.author}`));
   credits.append(byRow);
   for (const { label, url } of APP.links) {
-    const link = document.createElement("button");
-    link.className = "group-link";
-    link.textContent = label;
-    link.addEventListener("click", () => openUrl(url).catch(() => {}));
     const row = groupRow();
-    row.append(link);
+    row.append(
+      el("button", {
+        class: "group-link",
+        text: label,
+        on: { click: () => openUrl(url).catch(() => {}) },
+      }),
+    );
     credits.append(row);
   }
   host.append(credits);
@@ -1973,113 +1926,117 @@ function renderSyncSection() {
   host.replaceChildren();
 
   // Header: title + status pill
-  const header = document.createElement("div");
-  header.className = "sync-header";
-  const title = document.createElement("div");
-  title.className = "sync-header-title";
-  title.textContent = "Cloud";
-  const pill = document.createElement("span");
-  pill.className = "sync-pill";
-  header.append(title, pill);
-  host.append(header);
+  const pill = el("span", { class: "sync-pill" });
+  host.append(
+    el(
+      "div",
+      { class: "sync-header" },
+      el("div", { class: "sync-header-title", text: "Cloud" }),
+      pill,
+    ),
+  );
 
   // Connection card
   host.append(groupTitle("Connection"));
   const conn = groupCard();
 
   // Worker URL
+  const urlInput = el("input", {
+    class: "prompt-input sync-input",
+    type: "url",
+    placeholder: "https://…workers.dev",
+    spellcheck: false,
+  });
   const urlRow = groupRow();
   urlRow.classList.add("sync-row");
-  urlRow.append(rowLabel("Worker URL"));
-  const urlInput = document.createElement("input");
-  urlInput.className = "prompt-input sync-input";
-  urlInput.type = "url";
-  urlInput.placeholder = "https://…workers.dev";
-  urlInput.spellcheck = false;
-  urlRow.append(urlInput);
+  urlRow.append(rowLabel("Worker URL"), urlInput);
   conn.append(urlRow);
 
   // Auth token + reveal eye
+  const tokenInput = el("input", {
+    class: "prompt-input sync-input",
+    type: "password",
+    placeholder: "paste or generate",
+    autocomplete: "off",
+    spellcheck: false,
+  });
+  const eyeBtn = el("button", {
+    class: "sync-eye",
+    type: "button",
+    title: "Show token",
+    aria: { label: "Show token" },
+    html: EYE_SVG,
+  });
   const tokenRow = groupRow();
   tokenRow.classList.add("sync-row");
-  tokenRow.append(rowLabel("Auth token"));
-  const tokenWrap = document.createElement("div");
-  tokenWrap.className = "sync-token-wrap";
-  const tokenInput = document.createElement("input");
-  tokenInput.className = "prompt-input sync-input";
-  tokenInput.type = "password";
-  tokenInput.placeholder = "paste or generate";
-  tokenInput.autocomplete = "off";
-  tokenInput.spellcheck = false;
-  const eyeBtn = document.createElement("button");
-  eyeBtn.className = "sync-eye";
-  eyeBtn.type = "button";
-  eyeBtn.title = "Show token";
-  eyeBtn.setAttribute("aria-label", "Show token");
-  eyeBtn.innerHTML = EYE_SVG;
-  tokenWrap.append(tokenInput, eyeBtn);
-  tokenRow.append(tokenWrap);
+  tokenRow.append(
+    rowLabel("Auth token"),
+    el("div", { class: "sync-token-wrap" }, tokenInput, eyeBtn),
+  );
   conn.append(tokenRow);
 
   // Actions: Copy token / Regenerate (left) — Verify Connection (right)
-  const actionsRow = groupRow();
-  actionsRow.className = "group-row sync-actions-row";
-  const leftActions = document.createElement("div");
-  leftActions.className = "sync-actions";
-  const copyBtn = document.createElement("button");
-  copyBtn.className = "prompt-btn sync-btn";
-  copyBtn.innerHTML = `${COPY_SVG}<span>Copy</span>`;
-  const genBtn = document.createElement("button");
-  genBtn.className = "prompt-btn sync-btn";
-  genBtn.innerHTML = `${REFRESH_SVG}<span>Regenerate</span>`;
-  leftActions.append(copyBtn, genBtn);
-  const verifyBtn = document.createElement("button");
-  verifyBtn.className = "prompt-btn primary sync-btn";
-  verifyBtn.innerHTML = `${CHECK_SVG}<span>Verify Connection</span>`;
-  actionsRow.append(leftActions, verifyBtn);
-  conn.append(actionsRow);
+  const copyBtn = el("button", {
+    class: "prompt-btn sync-btn",
+    html: `${COPY_SVG}<span>Copy</span>`,
+  });
+  const genBtn = el("button", {
+    class: "prompt-btn sync-btn",
+    html: `${REFRESH_SVG}<span>Regenerate</span>`,
+  });
+  const verifyBtn = el("button", {
+    class: "prompt-btn primary sync-btn",
+    html: `${CHECK_SVG}<span>Verify Connection</span>`,
+  });
+  conn.append(
+    el(
+      "div",
+      { class: "group-row sync-actions-row" },
+      el("div", { class: "sync-actions" }, copyBtn, genBtn),
+      verifyBtn,
+    ),
+  );
   host.append(conn);
 
-  const help = document.createElement("p");
-  help.className = "sync-help";
-  help.textContent =
-    "Paste this token as the worker's SYNC_TOKEN secret when you deploy to Cloudflare. It's the only thing protecting your notes — treat it like a password.";
-  host.append(help);
+  host.append(
+    el("p", {
+      class: "sync-help",
+      text: "Paste this token as the worker's SYNC_TOKEN secret when you deploy to Cloudflare. It's the only thing protecting your notes — treat it like a password.",
+    }),
+  );
 
   // Setup Guide
-  const guideHead = document.createElement("div");
-  guideHead.className = "sync-guide-head";
-  guideHead.append(groupTitle("Setup Guide"));
-  const ghLink = document.createElement("button");
-  ghLink.className = "group-link";
-  ghLink.textContent = "View on GitHub";
-  ghLink.addEventListener("click", () => openUrl(APP.worker.repoUrl).catch(() => {}));
-  guideHead.append(ghLink);
-  host.append(guideHead);
-
-  const deployBtn = document.createElement("button");
-  deployBtn.className = "sync-deploy";
-  deployBtn.innerHTML = `${CLOUD_SVG}<span>Deploy to Cloudflare</span>`;
-  deployBtn.addEventListener("click", () => openUrl(APP.worker.deployUrl).catch(() => {}));
-  host.append(deployBtn);
-
-  const steps = document.createElement("details");
-  steps.className = "sync-steps";
-  const summary = document.createElement("summary");
-  summary.textContent = "Setup steps";
-  steps.append(summary);
-  const ol = document.createElement("ol");
-  for (const t of [
-    "Generate a token above and copy it — you'll paste it into Cloudflare next.",
-    'Click "Deploy to Cloudflare". It clones the worker, provisions R2 + D1, and asks for the SYNC_TOKEN secret — paste the token you copied.',
-    'Paste your worker URL above, then click "Verify Connection" to finish and confirm.',
-  ]) {
-    const li = document.createElement("li");
-    li.textContent = t;
-    ol.append(li);
-  }
-  steps.append(ol);
-  host.append(steps);
+  host.append(
+    el(
+      "div",
+      { class: "sync-guide-head" },
+      groupTitle("Setup Guide"),
+      el("button", {
+        class: "group-link",
+        text: "View on GitHub",
+        on: { click: () => openUrl(APP.worker.repoUrl).catch(() => {}) },
+      }),
+    ),
+    el("button", {
+      class: "sync-deploy",
+      html: `${CLOUD_SVG}<span>Deploy to Cloudflare</span>`,
+      on: { click: () => openUrl(APP.worker.deployUrl).catch(() => {}) },
+    }),
+    el(
+      "details",
+      { class: "sync-steps" },
+      el("summary", { text: "Setup steps" }),
+      el(
+        "ol",
+        {},
+        ...[
+          "Generate a token above and copy it — you'll paste it into Cloudflare next.",
+          'Click "Deploy to Cloudflare". It clones the worker, provisions R2 + D1, and asks for the SYNC_TOKEN secret — paste the token you copied.',
+          'Paste your worker URL above, then click "Verify Connection" to finish and confirm.',
+        ].map((t) => el("li", { text: t })),
+      ),
+    ),
+  );
 
   // --- state + behavior ---
   let hasToken = false;
@@ -2327,12 +2284,7 @@ function showToast(
   { actionLabel, onAction, secondaryLabel, onSecondary, timeout = 5000 } = {},
 ) {
   const host = document.getElementById("toast-host");
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  const msg = document.createElement("span");
-  msg.className = "toast-msg";
-  msg.textContent = message;
-  toast.append(msg);
+  const toast = el("div", { class: "toast" }, el("span", { class: "toast-msg", text: message }));
   let timer;
   const dismiss = () => {
     clearTimeout(timer);
@@ -2340,12 +2292,15 @@ function showToast(
     setTimeout(() => toast.remove(), 200);
   };
   const button = (label, handler, cls) => {
-    const b = document.createElement("button");
-    b.className = cls;
-    b.textContent = label;
-    b.addEventListener("click", () => {
-      handler?.();
-      dismiss();
+    const b = el("button", {
+      class: cls,
+      text: label,
+      on: {
+        click: () => {
+          handler?.();
+          dismiss();
+        },
+      },
     });
     toast.append(b);
   };
@@ -2378,29 +2333,19 @@ function closeContextMenu() {
 /** Show a small menu at (x, y). `items` = {label, action, disabled} or {separator}. */
 function showContextMenu(x, y, items) {
   closeContextMenu();
-  const menu = document.createElement("div");
-  menu.id = "context-menu";
-  menu.className = "context-menu";
+  const menu = el("div", { id: "context-menu", class: "context-menu", role: "menu" });
   let i = 0;
   for (const it of items) {
     if (it.separator) {
-      const sep = document.createElement("div");
-      sep.className = "context-sep";
-      menu.append(sep);
+      menu.append(el("div", { class: "context-sep" }));
       continue;
     }
-    const b = document.createElement("button");
-    b.className = "context-item" + (it.disabled ? " disabled" : "");
-    const label = document.createElement("span");
-    label.className = "context-label";
-    label.textContent = it.label;
-    b.append(label);
-    if (it.accel) {
-      const kbd = document.createElement("span");
-      kbd.className = "context-accel";
-      kbd.textContent = it.accel;
-      b.append(kbd);
-    }
+    const b = el(
+      "button",
+      { class: "context-item" + (it.disabled ? " disabled" : ""), role: "menuitem", tabIndex: -1 },
+      el("span", { class: "context-label", text: it.label }),
+    );
+    if (it.accel) b.append(el("span", { class: "context-accel", text: it.accel }));
     b.style.animationDelay = `${i++ * 18}ms`; // gentle stagger on open
     if (!it.disabled) {
       b.addEventListener("click", () => {
@@ -2409,11 +2354,6 @@ function showContextMenu(x, y, items) {
       });
     }
     menu.append(b);
-  }
-  menu.setAttribute("role", "menu");
-  for (const b of menu.querySelectorAll(".context-item")) {
-    b.setAttribute("role", "menuitem");
-    b.tabIndex = -1;
   }
   menu.addEventListener("keydown", (e) => {
     if (e.key === "Tab") {
@@ -2782,26 +2722,22 @@ function renderSwitcher(query) {
   list.replaceChildren();
 
   if (switcherResults.length === 0) {
-    const li = document.createElement("li");
-    li.className = "switcher-empty";
-    li.textContent = "No matching drafts";
-    list.append(li);
+    list.append(el("li", { class: "switcher-empty", text: "No matching drafts" }));
     return;
   }
   switcherResults.forEach((d, i) => {
-    const li = document.createElement("li");
-    li.className = "switcher-item" + (i === 0 ? " sel" : "");
-    li.dataset.id = d.id;
-    const t = document.createElement("div");
-    t.className = "s-title";
-    t.textContent = draftTitle(d);
-    const s = document.createElement("div");
-    s.className = "s-sub";
-    s.textContent = `${draftSubText(d)} · ${relTime(d.updated_at)}`;
-    li.append(t, s);
-    li.addEventListener("click", () => chooseSwitcher(i));
-    li.addEventListener("mousemove", () => setSwitcherSel(i));
-    list.append(li);
+    list.append(
+      el(
+        "li",
+        {
+          class: "switcher-item" + (i === 0 ? " sel" : ""),
+          data: { id: d.id },
+          on: { click: () => chooseSwitcher(i), mousemove: () => setSwitcherSel(i) },
+        },
+        el("div", { class: "s-title", text: draftTitle(d) }),
+        el("div", { class: "s-sub", text: `${draftSubText(d)} · ${relTime(d.updated_at)}` }),
+      ),
+    );
   });
 }
 
