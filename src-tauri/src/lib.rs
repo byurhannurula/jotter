@@ -50,6 +50,12 @@ fn mtime_ms(path: &str) -> Option<i64> {
         .map(|d| d.as_millis() as i64)
 }
 
+/// Commands return `Result<_, String>` because that is what crosses the IPC
+/// boundary; every fallible std/serde/reqwest call funnels through here.
+fn msg(e: impl std::fmt::Display) -> String {
+    e.to_string()
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -77,8 +83,8 @@ fn file_gone(d: &Draft) -> bool {
 }
 
 fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(msg)?;
+    fs::create_dir_all(&dir).map_err(msg)?;
     Ok(dir)
 }
 
@@ -113,7 +119,7 @@ fn drafts_dir(app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
     let dir = default_drafts_dir(app)?;
-    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(msg)?;
     Ok(dir)
 }
 
@@ -151,10 +157,10 @@ fn set_drafts_dir(app: AppHandle, dir: Option<String>) -> Result<String, String>
         Some(d) => PathBuf::from(d),
         None => default_drafts_dir(&app)?,
     };
-    fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&to).map_err(msg)?;
 
     if from != to {
-        for entry in fs::read_dir(&from).map_err(|e| e.to_string())?.flatten() {
+        for entry in fs::read_dir(&from).map_err(msg)?.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
@@ -195,7 +201,7 @@ fn draft_path(dir: &Path, id: &str) -> PathBuf {
 
 fn read_all_drafts_in(dir: &Path) -> Result<Vec<Draft>, String> {
     let mut out = Vec::new();
-    for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+    for entry in fs::read_dir(dir).map_err(msg)?.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
@@ -264,7 +270,7 @@ fn read_json<T: serde::de::DeserializeOwned + Default>(path: Result<PathBuf, Str
 
 /// Write `value` as pretty JSON, atomically.
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(value).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(value).map_err(msg)?;
     write_atomic(path, json.as_bytes())
 }
 
@@ -289,7 +295,7 @@ fn write_draft_in(dir: &Path, draft: &Draft) -> Result<Option<i64>, String> {
 /// to the entry itself (a path spelled differently), where writing the file
 /// would risk putting stale content over a newer copy on disk.
 fn write_entry_in(dir: &Path, draft: &Draft) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(draft).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string_pretty(draft).map_err(msg)?;
     write_atomic(&draft_path(dir, &draft.id), json.as_bytes())
 }
 
@@ -299,7 +305,7 @@ fn draft_file(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
 
 fn read_all_drafts(app: &AppHandle) -> Result<Vec<Draft>, String> {
     let mut out = read_all_drafts_in(&drafts_dir(app)?)?;
-    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    out.sort_by_key(|d| std::cmp::Reverse(d.updated_at));
     Ok(out)
 }
 
@@ -429,8 +435,8 @@ fn save_draft(app: AppHandle, draft: Draft) -> Result<Option<i64>, String> {
 /// on disk that may be newer.
 fn update_entry_in(dir: &Path, id: &str, change: impl FnOnce(&mut Draft)) -> Result<Draft, String> {
     let path = draft_path(dir, id);
-    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut d: Draft = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let text = fs::read_to_string(&path).map_err(msg)?;
+    let mut d: Draft = serde_json::from_str(&text).map_err(msg)?;
     change(&mut d);
     write_entry_in(dir, &d)?;
     Ok(d)
@@ -483,7 +489,7 @@ fn set_cloud(app: AppHandle, id: String, on: bool) -> Result<(), String> {
 fn delete_draft(app: AppHandle, id: String) -> Result<(), String> {
     let path = draft_file(&app, &id)?;
     if path.exists() {
-        fs::remove_file(path).map_err(|e| e.to_string())?;
+        fs::remove_file(path).map_err(msg)?;
     }
     record_tombstone(&app, &id); // so the deletion propagates on the next sync
     Ok(())
@@ -552,7 +558,7 @@ fn open_drafts_dir(app: AppHandle) -> Result<(), String> {
     let dir = drafts_dir(&app)?;
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
-        .map_err(|e| e.to_string())
+        .map_err(msg)
 }
 
 /// Resolve a path to its canonical form: symlinks followed, `.`/`..` removed,
@@ -606,7 +612,7 @@ fn canonical_path(path: String) -> String {
 /// whether anything else has written to it.
 #[tauri::command]
 fn read_text_file(path: String) -> Result<(String, Option<i64>), String> {
-    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let text = fs::read_to_string(&path).map_err(msg)?;
     Ok((text, mtime_ms(&path)))
 }
 
@@ -793,13 +799,13 @@ async fn sync_test_connection(app: AppHandle) -> Result<TestResult, String> {
     }
     let base = normalize_url(&cfg.url);
     let token = cfg.token;
-    let client = http_client(15)?;
+    let client = http_client();
     let resp = client
         .get(format!("{base}/health"))
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(msg)?;
     let status = resp.status().as_u16();
     let version = if status == 200 {
         resp.json::<serde_json::Value>()
@@ -902,7 +908,7 @@ async fn sync_once(app: &AppHandle) -> Result<bool, String> {
     };
     let dir = drafts_dir(app)?;
     let (changed, synced, pushed_deletes) = sync_core(
-        &http_client(20)?,
+        http_client(),
         &base,
         token,
         &dir,
@@ -944,12 +950,12 @@ async fn sync_core(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(msg)?
         .error_for_status()
-        .map_err(|e| e.to_string())?
+        .map_err(msg)?
         .json()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(msg)?;
 
     for entry in list.drafts {
         // A draft this device has just deleted is still listed by the worker
@@ -984,9 +990,9 @@ async fn sync_core(
                 .bearer_auth(token)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(msg)?;
             if resp.status().is_success() {
-                let mut remote: Draft = resp.json().await.map_err(|e| e.to_string())?;
+                let mut remote: Draft = resp.json().await.map_err(msg)?;
                 // Never overwrite the device-local file path; keep the local one.
                 remote.file_path = local.get(&entry.id).and_then(|l| l.file_path.clone());
                 // write_draft_in records the file's new mtime in the stored
@@ -1012,7 +1018,7 @@ async fn sync_core(
             let mut up = d.clone();
             up.file_path = None; // device-local; never leaves the machine
             up.file_mtime = None; // ditto — it describes this machine's copy
-            let body = serde_json::to_string(&up).map_err(|e| e.to_string())?;
+            let body = serde_json::to_string(&up).map_err(msg)?;
             let resp = client
                 .put(format!("{base}/drafts/{id}"))
                 .bearer_auth(token)
@@ -1020,7 +1026,7 @@ async fn sync_core(
                 .body(body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(msg)?;
             if resp.status().is_success() {
                 synced.insert(id.clone(), d.updated_at);
             }
@@ -1130,11 +1136,16 @@ fn write_shares(app: &AppHandle, cache: &ShareCache) -> Result<(), String> {
     write_json(&shares_file(app)?, cache)
 }
 
-fn http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(timeout_secs))
-        .build()
-        .map_err(|e| e.to_string())
+/// One client for the whole process: reqwest pools connections per client, so
+/// a fresh one per call paid a new TLS handshake on every sync tick.
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .expect("reqwest client with default TLS")
+    })
 }
 
 /// Fetch the live share registry from the worker (`GET /shares`) into a cache map.
@@ -1161,12 +1172,12 @@ async fn fetch_shares(
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(msg)?
         .error_for_status()
-        .map_err(|e| e.to_string())?
+        .map_err(msg)?
         .json()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(msg)?;
     Ok(list
         .shares
         .into_iter()
@@ -1208,7 +1219,7 @@ async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
         share_id: String,
         url: String,
     }
-    let resp = http_client(15)?
+    let resp = http_client()
         .post(format!("{base}/share"))
         .bearer_auth(token)
         .json(&Req {
@@ -1219,11 +1230,11 @@ async fn create_share(app: AppHandle, id: String) -> Result<ShareInfo, String> {
         })
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(msg)?;
     if !resp.status().is_success() {
         return Err(format!("share failed ({})", resp.status().as_u16()));
     }
-    let r: Resp = resp.json().await.map_err(|e| e.to_string())?;
+    let r: Resp = resp.json().await.map_err(msg)?;
     let info = ShareInfo {
         share_id: r.share_id,
         url: r.url,
@@ -1242,13 +1253,13 @@ async fn revoke_share(app: AppHandle, id: String) -> Result<(), String> {
     let Some((base, token)) = cfg.endpoint() else {
         return Err("cloud not configured".into());
     };
-    let client = http_client(15)?;
+    let client = http_client();
     let mut cache = read_shares(&app);
 
     // Resolve the share id from the cache, else ask the worker.
     let share_id = match cache.get(&id) {
         Some(info) => info.share_id.clone(),
-        None => match fetch_shares(&client, &base, token).await?.get(&id) {
+        None => match fetch_shares(client, &base, token).await?.get(&id) {
             Some(info) => info.share_id.clone(),
             None => return Ok(()), // nothing to revoke
         },
@@ -1258,7 +1269,7 @@ async fn revoke_share(app: AppHandle, id: String) -> Result<(), String> {
         .bearer_auth(token)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(msg)?;
     // 2xx = revoked; 404 = already gone. Anything else means the share may still
     // be live, so keep the cache entry and surface the failure to the UI.
     if !resp.status().is_success() && resp.status().as_u16() != 404 {
@@ -1277,7 +1288,7 @@ async fn refresh_shares(app: AppHandle) -> Result<ShareCache, String> {
     let Some((base, token)) = cfg.endpoint() else {
         return Ok(ShareCache::new());
     };
-    let map = fetch_shares(&http_client(15)?, &base, token).await?;
+    let map = fetch_shares(http_client(), &base, token).await?;
     write_shares(&app, &map)?;
     Ok(map)
 }
@@ -2272,7 +2283,7 @@ mod tests {
             .await;
 
         let (changed, synced, pushed) = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2303,7 +2314,7 @@ mod tests {
         // No PUT mock: a push of this draft would 404 and never land in `synced`.
 
         let (_, synced, pushed) = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2338,7 +2349,7 @@ mod tests {
             .await;
 
         let (changed, synced, _) = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2369,7 +2380,7 @@ mod tests {
             .await;
 
         let (changed, synced, _) = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2404,7 +2415,7 @@ mod tests {
             .await;
 
         let (changed, synced, _) = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2437,7 +2448,7 @@ mod tests {
         let mut tombstones = HashMap::new();
         tombstones.insert("draft-c".to_string(), 300i64);
         let (_, synced, pushed) = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2481,7 +2492,7 @@ mod tests {
         let mut tombstones = HashMap::new();
         tombstones.insert("draft-c".to_string(), 300i64);
         let (_, _, pushed) = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2518,7 +2529,7 @@ mod tests {
             .await;
 
         sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "tok",
             dir.path(),
@@ -2545,7 +2556,7 @@ mod tests {
             .await;
 
         let result = sync_core(
-            &http_client(15).unwrap(),
+            http_client(),
             &server.uri(),
             "wrong",
             dir.path(),
