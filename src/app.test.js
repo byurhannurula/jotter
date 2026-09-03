@@ -468,6 +468,54 @@ describe("sync landing on the active draft", () => {
   });
 });
 
+describe("a file changed outside the app", () => {
+  const fileSeed = () => ({
+    drafts: [
+      {
+        id: "draft-f",
+        title: "",
+        content: "on disk",
+        file_path: "/notes/f.txt",
+        created_at: 1,
+        updated_at: 1,
+        pinned: false,
+        cloud: false,
+      },
+    ],
+    files: { "/notes/f.txt": "on disk" },
+  });
+
+  /** Open the file, type over it, let another program change the file, and
+   *  let the autosave run into the conflict. */
+  async function typeIntoChangedFile() {
+    app = await boot(fileSeed());
+    await app.clickDraft("draft-f");
+    await app.type("mine");
+    app.host.editOutside("/notes/f.txt", "theirs");
+    await app.autosave();
+    expect(app.host.disk.get("/notes/f.txt")).toBe("theirs"); // the write was refused
+    expect(app.host.disk.get("/notes/f (conflicted copy).txt")).toBe("mine"); // and parked
+  }
+
+  it("Reload shows the file's text and forgets the typed text", async () => {
+    await typeIntoChangedFile();
+    expect(await app.clickToast("Reload")).toBe(true);
+    expect(app.editor.value).toBe("theirs");
+    await app.autosave();
+    expect(app.host.disk.get("/notes/f.txt")).toBe("theirs"); // nothing left to write
+  });
+
+  it("Keep mine writes the typed text over the file", async () => {
+    await typeIntoChangedFile();
+    expect(await app.clickToast("Keep mine")).toBe(true);
+    expect(app.editor.value).toBe("mine");
+    expect(app.host.disk.get("/notes/f.txt")).toBe("mine");
+    await app.type("mine, then more");
+    await app.autosave();
+    expect(app.host.disk.get("/notes/f.txt")).toBe("mine, then more"); // the next save is normal
+  });
+});
+
 describe("a mixed session", () => {
   it("always shows the active draft's text and never loses an edit", async () => {
     app = await boot(seed());
