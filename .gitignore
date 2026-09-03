@@ -28,3 +28,5 @@ dist-ssr
 
 
 plans/
+# WebdriverIO output
+e2e/logs

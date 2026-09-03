@@ -1,0 +1,35 @@
+name: E2E
+
+# The real app under WebdriverIO, on a macOS runner (billed at 10x), so this is
+# started by hand or by the nightly schedule rather than on every push. The
+# binary is built with the `e2e` Cargo feature, which release.yml never passes.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+
+jobs:
+  e2e:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm e2e:build
+      - run: pnpm e2e
+      - name: Keep screenshots and logs from a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: e2e/logs
+          if-no-files-found: ignore

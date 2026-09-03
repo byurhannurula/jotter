@@ -34,6 +34,7 @@ compiles.
 ```bash
 pnpm test                                    # Vitest — lib/*.test.js + src/app.test.js
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust — store, sync engine, paths
+pnpm e2e:build && pnpm e2e                   # the real app under WebdriverIO (see e2e/)
 ```
 
 Keep both green before committing. Three layers:
@@ -44,6 +45,17 @@ Keep both green before committing. Three layers:
   path is shown), `sync-reconcile.js`, `sync-ui.js`. New logic goes here first.
   `empty-drafts.json` is read by both `text.test.js` and the Rust `is_orphan`
   test, so the prune rule stays one rule.
+- **The real app** in `e2e/` (WebdriverIO, `@wdio/tauri-service`, embedded
+  driver). One app launch per `specs/launch-*` folder over one throwaway data
+  folder (`JOTTER_DATA_DIR`), which is how quit-and-relaunch is expressed.
+  Needs the binary from `pnpm e2e:build` (Cargo feature `e2e`: adds the
+  WebDriver server, takes CLI file args on macOS, answers `is_e2e`, and the
+  page then exposes `window.__jotter.menu(id)` for menu-driven flows).
+  DOM reads and clicks go through `browser.execute`; walking element handles
+  from the test side is too slow in WKWebView. Keep it to what only a real
+  app shows: launch and relaunch, real files and the conflict prompt, the
+  native menu, focus mode. Runs on a macOS runner by hand or nightly
+  (`e2e.yml`), never on push.
 - **App wiring** in `src/app.test.js` (happy-dom): boots the real `main.js` against
   a fake Rust host built on `@tauri-apps/api/mocks` (`src/app-harness.js`), then
   drives it through sidebar clicks, menu events, context menus, toasts and typing.

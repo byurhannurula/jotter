@@ -83,6 +83,14 @@ fn file_gone(d: &Draft) -> bool {
 }
 
 fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    // The E2E binary is pointed at a throwaway folder so a test run can never
+    // touch the notes of whoever runs it.
+    #[cfg(feature = "e2e")]
+    if let Ok(dir) = std::env::var("JOTTER_DATA_DIR") {
+        let dir = PathBuf::from(dir);
+        fs::create_dir_all(&dir).map_err(msg)?;
+        return Ok(dir);
+    }
     let dir = app.path().app_data_dir().map_err(msg)?;
     fs::create_dir_all(&dir).map_err(msg)?;
     Ok(dir)
@@ -322,6 +330,12 @@ fn write_draft(app: &AppHandle, draft: &Draft) -> Result<Option<i64>, String> {
 }
 
 /// All saved drafts, newest first. Migrates the legacy single-session file once.
+/// True only in the E2E build. The page uses it to expose a test hook.
+#[tauri::command]
+fn is_e2e() -> bool {
+    cfg!(feature = "e2e")
+}
+
 #[tauri::command]
 fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
     let mut drafts = read_all_drafts(&app)?;
@@ -1343,7 +1357,7 @@ fn take_opened_files(app: AppHandle) -> Vec<String> {
 /// Pull candidate file paths out of a raw argv: skip the binary (arg 0) and any
 /// flags. `deliver_opened_paths` does the real-file filtering. Shared by the
 /// launch-time CLI scan and the single-instance forward, so both behave the same.
-#[cfg(not(target_os = "macos"))]
+#[cfg(any(not(target_os = "macos"), feature = "e2e"))]
 fn file_paths_from_args<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
     args.into_iter()
         .skip(1)
@@ -1353,7 +1367,7 @@ fn file_paths_from_args<I: IntoIterator<Item = String>>(args: I) -> Vec<String> 
 
 /// File paths on this process's command line. Used for Windows/Linux
 /// launch-with-file (where `RunEvent::Opened` doesn't fire).
-#[cfg(not(target_os = "macos"))]
+#[cfg(any(not(target_os = "macos"), feature = "e2e"))]
 fn cli_file_args() -> Vec<String> {
     file_paths_from_args(std::env::args())
 }
@@ -1650,6 +1664,14 @@ pub fn run() {
         }));
     }
 
+    // The WebDriver server for the E2E suite. Behind a Cargo feature that
+    // release builds never pass: it exposes automation over HTTP on
+    // 127.0.0.1:4445 and must not exist in a shipped binary.
+    #[cfg(feature = "e2e")]
+    {
+        builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    }
+
     builder
         .manage(SyncState {
             running: AtomicBool::new(false),
@@ -1669,7 +1691,9 @@ pub fn run() {
             }
             // Windows/Linux launch-with-file: the path is a CLI arg, not an
             // `Opened` event. Buffer it so the frontend picks it up on boot.
-            #[cfg(not(target_os = "macos"))]
+            // The E2E build takes CLI args on macOS too: WebDriver cannot
+            // drive Finder, so a command-line path is how a test opens a file.
+            #[cfg(any(not(target_os = "macos"), feature = "e2e"))]
             {
                 let args = cli_file_args();
                 if !args.is_empty() {
@@ -1688,6 +1712,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             init_store,
+            is_e2e,
             save_draft,
             delete_draft,
             read_text_file,

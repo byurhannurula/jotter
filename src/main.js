@@ -3047,6 +3047,64 @@ function isEditableFocused() {
 
 // --- init ----------------------------------------------------------------
 
+/** One native menu item, by id. Also the E2E suite's way in: WebDriver
+ *  key events do not reliably reach the menu bar. */
+function onMenu(id) {
+  switch (id) {
+    case "new":
+      newTab();
+      break;
+    case "open":
+      openFile();
+      break;
+    case "save":
+      save();
+      break;
+    case "save_as":
+      saveAs();
+      break;
+    case "close_tab":
+      closeTab(currentId);
+      break;
+    case "reopen_tab":
+      reopenClosedTab();
+      break;
+    case "switcher":
+      openSwitcher();
+      break;
+    case "next_tab":
+      cycleTab(1);
+      break;
+    case "prev_tab":
+      cycleTab(-1);
+      break;
+    case "find":
+      openFind(false);
+      break;
+    case "find_next":
+      find.open ? goNext() : openFind(false);
+      break;
+    case "find_prev":
+      find.open ? goPrev() : openFind(false);
+      break;
+    case "toggle_sidebar":
+      toggleSidebar();
+      break;
+    case "toggle_preview":
+      togglePreview();
+      break;
+    case "focus_mode":
+      requestFocusToggle();
+      break;
+    case "settings":
+      openSettings("general");
+      break;
+    case "about":
+      openSettings("about");
+      break;
+  }
+}
+
 async function init() {
   editor = document.getElementById("editor");
   listEl = document.getElementById("draft-list");
@@ -3075,6 +3133,9 @@ async function init() {
   }
   const list = await invoke("init_store");
   for (const d of list) drafts.set(d.id, d);
+
+  // Only the E2E build answers true; the hook lets a spec drive menu items.
+  if (await invoke("is_e2e").catch(() => false)) window.__jotter = { menu: onMenu };
 
   // Every launch starts on a fresh, clean page. Past notes live in the sidebar.
   startBlankSession();
@@ -3197,61 +3258,7 @@ async function init() {
     }, 400);
   });
 
-  await listen("menu", (event) => {
-    switch (event.payload) {
-      case "new":
-        newTab();
-        break;
-      case "open":
-        openFile();
-        break;
-      case "save":
-        save();
-        break;
-      case "save_as":
-        saveAs();
-        break;
-      case "close_tab":
-        closeTab(currentId);
-        break;
-      case "reopen_tab":
-        reopenClosedTab();
-        break;
-      case "switcher":
-        openSwitcher();
-        break;
-      case "next_tab":
-        cycleTab(1);
-        break;
-      case "prev_tab":
-        cycleTab(-1);
-        break;
-      case "find":
-        openFind(false);
-        break;
-      case "find_next":
-        find.open ? goNext() : openFind(false);
-        break;
-      case "find_prev":
-        find.open ? goPrev() : openFind(false);
-        break;
-      case "toggle_sidebar":
-        toggleSidebar();
-        break;
-      case "toggle_preview":
-        togglePreview();
-        break;
-      case "focus_mode":
-        requestFocusToggle();
-        break;
-      case "settings":
-        openSettings("general");
-        break;
-      case "about":
-        openSettings("about");
-        break;
-    }
-  });
+  await listen("menu", (event) => onMenu(event.payload));
 
   // Files opened from the OS: double-click an associated file, "Open With →
   // Jotter", or a path on the command line. Register the listener first (for

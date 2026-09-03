@@ -101,6 +101,7 @@ pnpm ship           # macOS: build + copy Jotter.app to /Applications
 ```bash
 pnpm test                   # Vitest — pure logic (title/preview/search, sync reconcile)
 cd src-tauri && cargo test  # Rust unit tests (store/serde)
+pnpm e2e:build && pnpm e2e  # the real app under WebdriverIO, in a throwaway data folder
 ```
 
 **Releasing** (maintainer):

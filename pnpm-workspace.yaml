@@ -1,5 +1,7 @@
 allowBuilds:
+  edgedriver: false
   esbuild: true
+  geckodriver: false
 
 # Supply-chain hardening: refuse package versions published in the last 48h.
 minimumReleaseAge: 2880
