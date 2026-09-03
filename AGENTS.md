@@ -40,8 +40,10 @@ Keep both green before committing. Three layers:
 
 - **Pure units** in `src/lib/*.js`, each with a `*.test.js` beside it: `text.js`
   (title/preview/search/indent), `tabs.js` (the tab model: open/close/cycle/reopen
-  as state transitions), `keys.js` (what a keypress means), `sync-reconcile.js`,
-  `sync-ui.js`. New logic goes here first.
+  as state transitions), `keys.js` (what a keypress means), `paths.js` (how a
+  path is shown), `sync-reconcile.js`, `sync-ui.js`. New logic goes here first.
+  `empty-drafts.json` is read by both `text.test.js` and the Rust `is_orphan`
+  test, so the prune rule stays one rule.
 - **App wiring** in `src/app.test.js` (happy-dom): boots the real `main.js` against
   a fake Rust host built on `@tauri-apps/api/mocks` (`src/app-harness.js`), then
   drives it through sidebar clicks, menu events, context menus, toasts and typing.
@@ -90,7 +92,9 @@ push. Release runs Rust on all three OSes.
   menu share. Keyboard rule: the tab bar and sidebar are one tab stop each; arrows
   move, Enter opens and sends focus to the editor, Backspace closes or deletes.
 - `lib/keys.js` — keyboard decisions (`tabKeyAction`: Tab indents, Escape then Tab
-  leaves the editor). `lib/text.js` — pure text helpers. `lib/meta.js` — app
+  leaves the editor; `CHORDS` + `shortcutOf`: the page-owned chords such as
+  ⌃Tab and ⇧⌘L, one document handler switches on the id). `lib/text.js` — pure
+  text helpers. `lib/paths.js` — `dirName`, `tildePath`, `shortPath`. `lib/meta.js` — app
   name/version/author links (drives the About screen; the release script bumps
   `version` here).
 - `index.html` / `styles.css`. `--titlebar-h` in the CSS must match `TITLEBAR_H` in
