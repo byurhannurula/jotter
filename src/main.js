@@ -19,6 +19,7 @@ import {
   lineCol,
   countWords,
 } from "./lib/text.js";
+import { dirName, tildePath, shortPath } from "./lib/paths.js";
 import { APP } from "./lib/meta.js";
 import { reconcileDrafts } from "./lib/sync-reconcile.js";
 import * as tabModel from "./lib/tabs.js";
@@ -175,8 +176,7 @@ function scheduleSync() {
 
 /** Compact location for a file path: home → ~, and drop the filename. */
 function fileDir(p) {
-  const dir = p.replace(/[/\\][^/\\]*$/, "") || p;
-  return dir.replace(/^(?:\/Users|\/home)\/[^/]+/, "~").replace(/^[A-Za-z]:\\Users\\[^\\]+/, "~");
+  return tildePath(dirName(p), homePath);
 }
 
 /** Sidebar/switcher sub-line: a saved file always shows its folder; an in-app
@@ -1641,52 +1641,14 @@ function rowLabel(text) {
 let draftsDirPath = "";
 let homePath = "";
 
-/** `/Users/me/Notes` -> `~/Notes`, the way a Mac shows a path to a person.
- *  Left alone on Windows, where `~` is not the convention. */
-function tildePath(p) {
-  if (p.includes("\\") || !homePath || !p.startsWith(homePath)) return p;
-  const rest = p.slice(homePath.length).replace(/^\//, "");
-  return rest ? `~/${rest}` : "~";
-}
-
-/** Abbreviate a long path from the middle, keeping the root and the last few
- *  folders — the two ends that say where you are. Done here rather than with
- *  CSS: left-truncating via `direction: rtl` reorders a leading `~` or `/` to
- *  the far end, which reads as a different path entirely. */
-function shortPath(p, max = 44) {
-  const full = tildePath(p);
-  if (full.length <= max) return full;
-
-  const sep = full.includes("\\") ? "\\" : "/";
-  const parts = full.split(/[/\\]/);
-  // A posix absolute path splits to a leading "", which is what puts the root
-  // separator back when the pieces are rejoined; on Windows the head is "C:".
-  // A UNC path (\\server\share) splits to two leading empties and needs both.
-  const head = parts[0] === "" && full.startsWith(sep + sep) ? sep : parts[0];
-  let tail = [];
-  for (let i = parts.length - 1; i > 0; i -= 1) {
-    const next = [parts[i], ...tail];
-    if (tail.length && `${head}${sep}…${sep}${next.join(sep)}`.length > max) break;
-    tail = next;
-  }
-  // If nothing was actually dropped, the ellipsis would be a lie (and longer).
-  if (tail.length >= parts.length - 1) return full;
-  return `${head}${sep}…${sep}${tail.join(sep)}`;
-}
-
 async function refreshDraftsDir() {
   const label = document.getElementById("drafts-dir-path");
   const reset = document.getElementById("drafts-dir-reset");
   if (!label) return;
   try {
-    if (!homePath) homePath = (await homeDir()).replace(/[/\\]+$/, "");
-  } catch {
-    homePath = "";
-  }
-  try {
     const [dir, isDefault, available] = await invoke("get_drafts_dir");
     draftsDirPath = dir;
-    label.textContent = shortPath(dir);
+    label.textContent = shortPath(dir, homePath);
     label.title = dir;
     label.classList.toggle("is-warning", !available);
     if (reset) reset.disabled = isDefault;
@@ -3090,6 +3052,13 @@ async function init() {
   initSwitcher();
   bindBackdrop("settings");
 
+  // Sidebar rows and the settings path both abbreviate the home folder, so it
+  // has to be known before the first render.
+  try {
+    homePath = (await homeDir()).replace(/[/\\]+$/, "");
+  } catch {
+    homePath = "";
+  }
   const list = await invoke("init_store");
   for (const d of list) drafts.set(d.id, d);
 
