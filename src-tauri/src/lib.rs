@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -362,6 +362,8 @@ fn is_e2e() -> bool {
 #[tauri::command]
 fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
     let mut drafts = read_all_drafts(&app)?;
+    // A file already in the store was chosen by the user in some past run.
+    allow_drafts(&app, &drafts);
 
     // Paths stored before opens were canonicalised may be spelled differently
     // from what an open produces now (`/tmp` vs `/private/tmp`, a symlinked
@@ -441,6 +443,7 @@ const CONFLICT: &str = "conflict";
 #[tauri::command]
 fn save_draft(app: AppHandle, draft: Draft) -> Result<Option<i64>, String> {
     if let Some(path) = draft.file_path.as_deref() {
+        check_allowed(&app, path)?;
         if is_conflict(draft.file_mtime, mtime_ms(path)) {
             return Err(CONFLICT.to_string());
         }
@@ -574,7 +577,8 @@ fn conflict_copy_path(path: &Path) -> PathBuf {
 /// conflict is noticed means neither can, whatever the user does next.
 /// Returns the path written, for the message.
 #[tauri::command]
-fn write_conflict_copy(path: String, contents: String) -> Result<String, String> {
+fn write_conflict_copy(app: AppHandle, path: String, contents: String) -> Result<String, String> {
+    check_allowed(&app, &path)?;
     let target = conflict_copy_path(Path::new(&path));
     write_atomic(&target, contents.as_bytes())?;
     Ok(path_str(&target))
@@ -594,6 +598,143 @@ fn open_drafts_dir(app: AppHandle) -> Result<(), String> {
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
         .map_err(msg)
+}
+
+// --- What the page may touch on disk ----------------------------------------
+//
+// `read_text_file`, `write_text_file` and `save_draft` take a path from the
+// webview, so a page running someone else's script could name any file on the
+// machine. The host therefore keeps the set of paths the *user* chose — a file
+// dialog, a drop on the window, "Open With", the command line, or a file the
+// store already tracks — and refuses every other path. The set lives for one
+// run and is never persisted: nothing the page says can add to it, which is why
+// the dialogs are opened from here rather than from the webview.
+#[derive(Default)]
+struct Allowed(Mutex<HashSet<String>>);
+
+const DENIED: &str = "that file was not opened by the user";
+
+/// Record a path the user chose. Held canonical, so the check matches however
+/// the page later spells the same file.
+fn allow_in(set: &Allowed, path: &str) {
+    set.0.lock().unwrap().insert(canonical(path));
+}
+
+fn check_in(set: &Allowed, path: &str) -> Result<(), String> {
+    if set.0.lock().unwrap().contains(&canonical(path)) {
+        Ok(())
+    } else {
+        Err(DENIED.to_string())
+    }
+}
+
+fn allow_path(app: &AppHandle, path: &str) {
+    if let Some(state) = app.try_state::<Allowed>() {
+        allow_in(&state, path);
+    }
+}
+
+fn allow_drafts(app: &AppHandle, drafts: &[Draft]) {
+    for p in drafts.iter().filter_map(|d| d.file_path.as_deref()) {
+        allow_path(app, p);
+    }
+}
+
+fn check_allowed(app: &AppHandle, path: &str) -> Result<(), String> {
+    let state = app.try_state::<Allowed>().ok_or(DENIED)?;
+    check_in(&state, path)
+}
+
+/// One entry of a dialog's file-type filter, in the shape the page already uses.
+#[derive(Deserialize)]
+struct Filter {
+    name: String,
+    extensions: Vec<String>,
+}
+
+fn with_filters(
+    mut builder: tauri_plugin_dialog::FileDialogBuilder<tauri::Wry>,
+    filters: &[Filter],
+) -> tauri_plugin_dialog::FileDialogBuilder<tauri::Wry> {
+    for f in filters {
+        let exts: Vec<&str> = f.extensions.iter().map(String::as_str).collect();
+        builder = builder.add_filter(&f.name, &exts);
+    }
+    builder
+}
+
+/// Run a file dialog off the async runtime and wait for the answer.
+///
+/// The blocking variants of the plugin's API panic when called from the main
+/// thread, which is where a non-async command runs, so the dialog is opened
+/// with the callback API and the reply comes back over a channel.
+async fn ask_for_path(
+    open: impl FnOnce(std::sync::mpsc::Sender<Option<tauri_plugin_dialog::FilePath>>) + Send + 'static,
+) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    open(tx);
+    let picked = tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .ok()??;
+    picked.into_path().ok().map(|p| path_str(&p))
+}
+
+/// File > Open. The picked file becomes readable; nothing else does.
+#[tauri::command]
+async fn pick_file(app: AppHandle, filters: Vec<Filter>) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = with_filters(app.dialog().clone().file(), &filters);
+    let path = ask_for_path(move |tx| {
+        dialog.pick_file(move |p| {
+            let _ = tx.send(p);
+        })
+    })
+    .await?;
+    allow_path(&app, &path);
+    Some(path)
+}
+
+/// Save As and Export. The chosen name becomes writable, and stays writable for
+/// the rest of the run so later autosaves of that draft go through.
+#[tauri::command]
+async fn pick_save_path(
+    app: AppHandle,
+    default_path: Option<String>,
+    filters: Vec<Filter>,
+) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = with_filters(app.dialog().clone().file(), &filters);
+    if let Some(d) = default_path.as_deref() {
+        let p = Path::new(d);
+        if let Some(name) = p.file_name() {
+            dialog = dialog.set_file_name(name.to_string_lossy());
+        }
+        if let Some(dir) = p.parent().filter(|d| !d.as_os_str().is_empty()) {
+            dialog = dialog.set_directory(dir);
+        }
+    }
+    let path = ask_for_path(move |tx| {
+        dialog.save_file(move |p| {
+            let _ = tx.send(p);
+        })
+    })
+    .await?;
+    allow_path(&app, &path);
+    Some(path)
+}
+
+/// Settings > Drafts folder. A folder is not a file the page can read, so this
+/// one grants nothing.
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog = app.dialog().clone().file();
+    ask_for_path(move |tx| {
+        dialog.pick_folder(move |p| {
+            let _ = tx.send(p);
+        })
+    })
+    .await
 }
 
 /// Resolve a path to its canonical form: symlinks followed, `.`/`..` removed,
@@ -646,7 +787,8 @@ fn canonical_path(path: String) -> String {
 /// A file's contents and its modification time, so the caller can tell later
 /// whether anything else has written to it.
 #[tauri::command]
-fn read_text_file(path: String) -> Result<(String, Option<i64>), String> {
+fn read_text_file(app: AppHandle, path: String) -> Result<(String, Option<i64>), String> {
+    check_allowed(&app, &path)?;
     let text = fs::read_to_string(&path).map_err(msg)?;
     Ok((text, mtime_ms(&path)))
 }
@@ -654,7 +796,8 @@ fn read_text_file(path: String) -> Result<(String, Option<i64>), String> {
 /// Write text to an arbitrary path the user picked (used by Export). Unlike
 /// `save_draft`, this doesn't touch the draft's own file_path.
 #[tauri::command]
-fn write_text_file(path: String, contents: String) -> Result<(), String> {
+fn write_text_file(app: AppHandle, path: String, contents: String) -> Result<(), String> {
+    check_allowed(&app, &path)?;
     write_atomic(Path::new(&path), contents.as_bytes())
 }
 
@@ -1137,6 +1280,7 @@ async fn sync_now(app: AppHandle) -> Result<(), String> {
 fn list_drafts(app: AppHandle) -> Result<Vec<Draft>, String> {
     let mut drafts = read_all_drafts(&app)?;
     drafts.retain(|d| !file_gone(d));
+    allow_drafts(&app, &drafts);
     Ok(drafts)
 }
 
@@ -1359,6 +1503,9 @@ fn deliver_opened_paths(app: &AppHandle, paths: Vec<String>) {
         .collect();
     if files.is_empty() {
         return;
+    }
+    for f in &files {
+        allow_path(app, f);
     }
     let state = app.state::<Mutex<OpenedFiles>>();
     let mut opened = state.lock().unwrap();
@@ -1702,6 +1849,7 @@ pub fn run() {
             running: AtomicBool::new(false),
         })
         .manage(Mutex::new(OpenedFiles::default()))
+        .manage(Allowed::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -1760,7 +1908,10 @@ pub fn run() {
             create_share,
             revoke_share,
             refresh_shares,
-            take_opened_files
+            take_opened_files,
+            pick_file,
+            pick_save_path,
+            pick_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1788,6 +1939,17 @@ pub fn run() {
                     position_traffic_lights(&win, TITLEBAR_H);
                 }
             }
+            // A file dropped on the window was chosen by the user as plainly as
+            // one picked in a dialog; the page reads the same paths from its own
+            // drag-drop event.
+            tauri::RunEvent::WindowEvent {
+                event: tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { ref paths, .. }),
+                ..
+            } => {
+                for p in paths {
+                    allow_path(app_handle, &path_str(p));
+                }
+            }
             tauri::RunEvent::ExitRequested { .. } => {
                 if let Some(win) = main_window(app_handle) {
                     save_window(&win);
@@ -1812,6 +1974,29 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_is_readable_only_after_the_user_picks_it() {
+        let set = Allowed::default();
+        assert!(check_in(&set, "/Users/someone/.ssh/id_rsa").is_err());
+        allow_in(&set, "/Users/someone/notes.txt");
+        assert!(check_in(&set, "/Users/someone/notes.txt").is_ok());
+        assert!(check_in(&set, "/Users/someone/.ssh/id_rsa").is_err());
+    }
+
+    #[test]
+    fn a_picked_path_matches_however_the_page_spells_it_back() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("notes.txt");
+        fs::write(&file, "hi").unwrap();
+
+        let set = Allowed::default();
+        allow_in(&set, &path_str(&file));
+        // Same file by a route through its own directory: what an "Open With"
+        // or a drop can hand back after the dialog spelled it differently.
+        let round_about = dir.path().join(".").join("notes.txt");
+        assert!(check_in(&set, &path_str(&round_about)).is_ok());
+    }
 
     fn draft(content: &str, file_path: Option<&str>) -> Draft {
         Draft {

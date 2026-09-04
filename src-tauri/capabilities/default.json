@@ -10,7 +10,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
-    "dialog:default",
+    "dialog:allow-ask",
     "opener:default",
     "opener:allow-reveal-item-in-dir",
     "updater:default",

@@ -95,8 +95,10 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
         at: Date.now(),
       });
     },
-    // The open dialog answers with whatever the test put in `dialog.next`.
-    "plugin:dialog|open": () => dialog.next,
+    // The host-side dialogs answer with whatever the test put in `dialog.next`.
+    pick_file: () => dialog.next,
+    pick_save_path: () => dialog.next,
+    pick_folder: () => dialog.next,
     canonical_path: ({ path }) => path,
     take_opened_files: () => [],
     get_sync_config: () => ({ enabled: false, url: "", has_token: false }),

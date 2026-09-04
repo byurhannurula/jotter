@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ask, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { homeDir } from "@tauri-apps/api/path";
 import { check as checkUpdate } from "@tauri-apps/plugin-updater";
@@ -1072,15 +1072,12 @@ function flushUi() {
   }
 }
 
+// The file dialogs are opened by the host, not by this page: the host only lets
+// `read_text_file` / `write_text_file` / a save touch a path the user picked, and
+// a pick asked for from here would prove nothing about who asked.
 async function openFile() {
-  const selected = await openDialog({
-    multiple: false,
-    directory: false,
-    filters: TEXT_FILTERS,
-  });
-  if (!selected) return;
-  const path = typeof selected === "string" ? selected : selected.path;
-  await openPathInTab(path);
+  const path = await invoke("pick_file", { filters: TEXT_FILTERS });
+  if (path) await openPathInTab(path);
 }
 
 /** Drop an empty, unsaved scratch draft (the blank "Untitled" every launch opens
@@ -1174,7 +1171,7 @@ async function openPaths(paths) {
 async function saveAs() {
   const d = drafts.get(currentId);
   if (!d) return;
-  const path = await saveDialog({
+  const path = await invoke("pick_save_path", {
     defaultPath: d.file_path ?? `${draftTitle(d)}.txt`,
     filters: TEXT_FILTERS,
   });
@@ -1725,8 +1722,8 @@ async function moveDraftsDir(dir) {
 }
 
 async function chooseDraftsDir() {
-  const picked = await openDialog({ directory: true, multiple: false });
-  if (typeof picked === "string") await moveDraftsDir(picked);
+  const picked = await invoke("pick_folder");
+  if (picked) await moveDraftsDir(picked);
 }
 
 function renderStorageSection() {
@@ -2602,7 +2599,7 @@ async function exportDraft(id) {
   const content = (id === currentId ? editorTextFor(id) : null) ?? d.content;
   const stem =
     (d.file_path ? baseName(d.file_path).replace(/\.[^.]+$/, "") : draftTitle(d)) || "Untitled";
-  const path = await saveDialog({
+  const path = await invoke("pick_save_path", {
     defaultPath: `${stem}.md`,
     filters: [
       { name: "Markdown", extensions: ["md"] },
