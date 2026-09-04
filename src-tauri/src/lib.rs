@@ -56,11 +56,38 @@ fn msg(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// The one window, wherever an `AppHandle` or the `App` itself is at hand.
+fn main_window(m: &impl Manager<tauri::Wry>) -> Option<tauri::WebviewWindow> {
+    m.get_webview_window("main")
+}
+
+fn is_json(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()) == Some("json")
+}
+
+fn path_str(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+impl Draft {
+    /// A fresh in-app draft; every flag at its default.
+    fn new(id: String, content: String, file_path: Option<String>, now: i64) -> Self {
+        Draft {
+            id,
+            content,
+            file_path,
+            created_at: now,
+            updated_at: now,
+            ..Default::default()
+        }
+    }
 }
 
 /// An "orphan" draft has nothing in it worth keeping — no text, no on-disk
@@ -146,11 +173,7 @@ fn get_drafts_dir(app: AppHandle) -> Result<(String, bool, bool), String> {
             let available = fs::create_dir_all(&dir).is_ok();
             Ok((dir, false, available))
         }
-        None => Ok((
-            default_drafts_dir(&app)?.to_string_lossy().into_owned(),
-            true,
-            true,
-        )),
+        None => Ok((path_str(&default_drafts_dir(&app)?), true, true)),
     }
 }
 
@@ -170,7 +193,7 @@ fn set_drafts_dir(app: AppHandle, dir: Option<String>) -> Result<String, String>
     if from != to {
         for entry in fs::read_dir(&from).map_err(msg)?.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            if !is_json(&path) {
                 continue;
             }
             let Some(name) = path.file_name() else {
@@ -192,11 +215,11 @@ fn set_drafts_dir(app: AppHandle, dir: Option<String>) -> Result<String, String>
         dir: if to == default_drafts_dir(&app)? {
             None
         } else {
-            Some(to.to_string_lossy().into_owned())
+            Some(path_str(&to))
         },
     };
     write_json(&store_config_file(&app)?, &cfg)?;
-    Ok(to.to_string_lossy().into_owned())
+    Ok(path_str(&to))
 }
 
 // Directory-based store primitives — take a plain `dir` so the sync engine can be
@@ -211,7 +234,7 @@ fn read_all_drafts_in(dir: &Path) -> Result<Vec<Draft>, String> {
     let mut out = Vec::new();
     for entry in fs::read_dir(dir).map_err(msg)?.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        if !is_json(&path) {
             continue;
         }
         if let Ok(text) = fs::read_to_string(&path) {
@@ -381,17 +404,7 @@ fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
             // Only migrate if there's something worth keeping.
             if !content.trim().is_empty() || file_path.is_some() {
                 let now = now_ms();
-                let draft = Draft {
-                    id: format!("draft-{now}"),
-                    title: String::new(),
-                    content: content.to_string(),
-                    file_path,
-                    created_at: now,
-                    updated_at: now,
-                    pinned: false,
-                    cloud: false,
-                    file_mtime: None,
-                };
+                let draft = Draft::new(format!("draft-{now}"), content.to_string(), file_path, now);
                 write_draft(&app, &draft)?;
                 drafts.push(draft);
             }
@@ -556,7 +569,7 @@ fn conflict_copy_path(path: &Path) -> PathBuf {
 fn write_conflict_copy(path: String, contents: String) -> Result<String, String> {
     let target = conflict_copy_path(Path::new(&path));
     write_atomic(&target, contents.as_bytes())?;
-    Ok(target.to_string_lossy().into_owned())
+    Ok(path_str(&target))
 }
 
 /// Reveal the drafts folder in the system file manager.
@@ -600,7 +613,7 @@ fn canonical(path: &str) -> String {
             _ => return path.to_string(),
         },
     };
-    strip_verbatim(resolved.to_string_lossy().into_owned())
+    strip_verbatim(path_str(&resolved))
 }
 
 /// Undo the `\\?\` verbatim prefix Windows' `canonicalize` adds (`\\?\C:\...`,
@@ -1066,6 +1079,16 @@ async fn sync_core(
     Ok((changed, synced, pushed_deletes))
 }
 
+/// `sync:status` for the status bar: `{ state, ...extra }`. Best effort; a
+/// webview that is not listening yet is not an error.
+fn emit_status(app: &AppHandle, state: &str, extra: serde_json::Value) {
+    let mut payload = serde_json::json!({ "state": state });
+    if let (Some(map), Some(more)) = (payload.as_object_mut(), extra.as_object()) {
+        map.extend(more.clone());
+    }
+    let _ = app.emit("sync:status", payload);
+}
+
 /// Run a sync pass in the background. Serialized by `SyncState` so passes never
 /// overlap; emits `sync:status` (syncing/idle/error) and `sync:changed` when
 /// something landed locally.
@@ -1080,7 +1103,7 @@ async fn sync_now(app: AppHandle) -> Result<(), String> {
     if state.running.swap(true, Ordering::SeqCst) {
         return Ok(()); // a sync is already in flight
     }
-    let _ = app.emit("sync:status", serde_json::json!({ "state": "syncing" }));
+    emit_status(&app, "syncing", serde_json::json!({}));
     let result = sync_once(&app).await;
     app.state::<SyncState>()
         .running
@@ -1090,17 +1113,11 @@ async fn sync_now(app: AppHandle) -> Result<(), String> {
             if changed {
                 let _ = app.emit("sync:changed", ());
             }
-            let _ = app.emit(
-                "sync:status",
-                serde_json::json!({ "state": "idle", "at": now_ms() }),
-            );
+            emit_status(&app, "idle", serde_json::json!({ "at": now_ms() }));
             Ok(())
         }
         Err(e) => {
-            let _ = app.emit(
-                "sync:status",
-                serde_json::json!({ "state": "error", "message": e.clone() }),
-            );
+            emit_status(&app, "error", serde_json::json!({ "message": e.clone() }));
             Err(e)
         }
     }
@@ -1594,7 +1611,7 @@ fn geom_file(app: &AppHandle) -> Result<PathBuf, String> {
 /// displays, where a physical/logical mismatch lost pixels every cycle.
 fn restore_window(app: &AppHandle) {
     use tauri::{LogicalSize, PhysicalSize};
-    let Some(win) = app.get_webview_window("main") else {
+    let Some(win) = main_window(app) else {
         return;
     };
 
@@ -1657,7 +1674,7 @@ pub fn run() {
     #[cfg(any(windows, target_os = "linux"))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if let Some(win) = app.get_webview_window("main") {
+            if let Some(win) = main_window(app) {
                 let _ = win.set_focus();
             }
             deliver_opened_paths(app, file_paths_from_args(args));
@@ -1686,7 +1703,7 @@ pub fn run() {
                 .plugin(tauri_plugin_updater::Builder::new().build())?;
             build_menu(app.handle())?;
             restore_window(app.handle());
-            if let Some(win) = app.get_webview_window("main") {
+            if let Some(win) = main_window(app) {
                 position_traffic_lights(&win, TITLEBAR_H);
             }
             // Windows/Linux launch-with-file: the path is a CLI arg, not an
@@ -1705,7 +1722,7 @@ pub fn run() {
         .on_menu_event(|app, event| {
             let id = event.id().0.as_str();
             if MENU_IDS.contains(&id) {
-                if let Some(window) = app.get_webview_window("main") {
+                if let Some(window) = main_window(app) {
                     let _ = window.emit("menu", id);
                 }
             }
@@ -1763,7 +1780,7 @@ pub fn run() {
                 }
             }
             tauri::RunEvent::ExitRequested { .. } => {
-                if let Some(win) = app_handle.get_webview_window("main") {
+                if let Some(win) = main_window(app_handle) {
                     save_window(&win);
                 }
             }
@@ -1775,7 +1792,7 @@ pub fn run() {
                 let paths: Vec<String> = urls
                     .iter()
                     .filter_map(|u| u.to_file_path().ok())
-                    .map(|p| p.to_string_lossy().into_owned())
+                    .map(|p| path_str(&p))
                     .collect();
                 deliver_opened_paths(app_handle, paths);
             }
@@ -1939,7 +1956,7 @@ mod tests {
     fn writing_a_file_backed_draft_records_the_files_mtime() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("note.txt");
-        let path = file.to_string_lossy().into_owned();
+        let path = path_str(&file);
         let mut d = draft("hello", Some(&path));
         d.id = "note".into();
         d.file_mtime = Some(1); // deliberately wrong
@@ -2401,7 +2418,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("note.txt");
         let mut d = mk_draft("draft-f", "local only", 100);
-        d.file_path = Some(file.to_string_lossy().into_owned()); // opened from disk, not opted in
+        d.file_path = Some(path_str(&file)); // opened from disk, not opted in
         write_draft_in(dir.path(), &d).unwrap();
         let server = MockServer::start().await;
         Mock::given(method("GET"))

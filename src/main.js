@@ -18,6 +18,7 @@ import {
   draftMatches,
   lineCol,
   countWords,
+  TAB_UNITS,
 } from "./lib/text.js";
 import { dirName, tildePath, shortPath } from "./lib/paths.js";
 import { el } from "./lib/dom.js";
@@ -169,10 +170,22 @@ let syncDebounceTimer = null;
 let syncRetryTimer = null;
 let syncFailures = 0;
 
+/** A `.catch` that says why the failure does not matter. */
+const ignore = (_why) => () => {};
+
+/** Best-effort sync tick: a failed pass is retried by the next one. */
+const syncNow = () => invoke("sync_now").catch(ignore("retried by the next tick"));
+
+/** Log the cause, tell the user in plain words. */
+function fail(message, err, tag = message) {
+  console.error(`${tag}:`, err);
+  showToast(message);
+}
+
 function scheduleSync() {
   if (!cloudConfigured) return;
   clearTimeout(syncDebounceTimer);
-  syncDebounceTimer = setTimeout(() => invoke("sync_now").catch(() => {}), SYNC_DEBOUNCE_MS);
+  syncDebounceTimer = setTimeout(() => syncNow(), SYNC_DEBOUNCE_MS);
 }
 
 /** Compact location for a file path: home → ~, and drop the filename. */
@@ -408,7 +421,7 @@ function updateWindowTitle() {
   document.title = name;
   if (name !== lastWinTitle) {
     lastWinTitle = name;
-    appWindow.setTitle(name).catch(() => {}); // avoid an IPC round-trip per keystroke
+    appWindow.setTitle(name).catch(ignore("the title is cosmetic")); // avoid an IPC round-trip per keystroke
   }
   syncSpellcheck();
   applyView();
@@ -437,7 +450,7 @@ function queueStatus() {
 let statusPosEl, statusCountEl;
 
 function updateStatus() {
-  if (getSetting("statusbar") === "off") return;
+  if (!isOn("statusbar")) return;
   if (!statusPosEl || !statusCountEl) return;
 
   // Use the model's copy (kept in sync by flushUi/applyEditorValue) rather than
@@ -686,7 +699,7 @@ function applyTabs({ state, effects }) {
  *  highlight), so it stays at the call site. */
 function runTabEffects(effects) {
   for (const e of effects) {
-    if (e.type === "delete") invoke("delete_draft", { id: e.id }).catch(() => {});
+    if (e.type === "delete") invoke("delete_draft", { id: e.id }).catch(ignore("already gone"));
     if (e.type === "forget") itemEls.delete(e.id);
   }
 }
@@ -936,7 +949,6 @@ function onInput() {
 // --- Tab indentation -----------------------------------------------------
 
 /** One indent step per `tabkey` setting value. */
-const TAB_UNITS = { tab: "\t", 2: "  ", 4: "    " };
 
 /** Which draft's text the textarea is currently showing. Guards the save path:
  *  see persist(). */
@@ -1077,8 +1089,7 @@ async function openPathInTab(path) {
   try {
     [content, mtime] = await invoke("read_text_file", { path });
   } catch (err) {
-    console.error("open failed:", err);
-    showToast(`Can't open ${baseName(path)} — not a readable text file.`);
+    fail(`Can't open ${baseName(path)} — not a readable text file.`, err, "open failed");
     return;
   }
 
@@ -1248,7 +1259,7 @@ async function toggleFocusMode(on = !focusMode) {
   syncSidebarBtn();
   // The in-window part of the mode is already applied, so a refused or
   // unavailable fullscreen still leaves a usable window.
-  if (getSetting("focusFull") === "on" || (!on && wasFullscreenFocus)) {
+  if (isOn("focusFull") || (!on && wasFullscreenFocus)) {
     wasFullscreenFocus = on;
     try {
       await appWindow.setFullscreen(on);
@@ -1336,6 +1347,14 @@ const SETTINGS = {
     def: "on",
     apply: applySidebarBtn,
     control: "toggle",
+  },
+  autoupdate: {
+    section: "about",
+    label: "Automatically check for updates",
+    def: "on",
+    apply: () => {}, // read once at launch
+    control: "toggle",
+    placed: true, // renderAboutSection puts this row in its Updates card
   },
   focusFull: {
     section: "general",
@@ -1475,6 +1494,8 @@ let eggClicks = 0;
 function getSetting(name) {
   return localStorage.getItem(`set-${name}`) ?? SETTINGS[name].def;
 }
+/** A toggle setting's state. Only for entries with `control: "toggle"`. */
+const isOn = (name) => getSetting(name) === "on";
 function setSetting(name, val) {
   localStorage.setItem(`set-${name}`, val);
   SETTINGS[name].apply(val);
@@ -1517,7 +1538,7 @@ function settingRow(name) {
           class: "switch interactive",
           id: `set-${name}`,
           role: "switch",
-          on: { click: () => setSetting(name, getSetting(name) === "on" ? "off" : "on") },
+          on: { click: () => setSetting(name, isOn(name) ? "off" : "on") },
         })
       : el(
           "div",
@@ -1689,8 +1710,7 @@ function renderStorageSection() {
         try {
           await invoke("open_drafts_dir");
         } catch (err) {
-          console.error("open_drafts_dir failed:", err);
-          showToast("Couldn't open the drafts folder");
+          fail("Couldn't open the drafts folder", err, "open_drafts_dir failed");
         }
       },
     },
@@ -1740,10 +1760,6 @@ function renderShortcutsSection() {
 // Inert until the app is configured with a real signer public key + signed
 // release artifacts; until then check() just errors and we fail quietly.
 
-function autoUpdateOn() {
-  return localStorage.getItem("set-autoupdate") !== "off"; // default on
-}
-
 let updateChecking = false;
 
 async function checkForUpdates({ silent = false } = {}) {
@@ -1776,8 +1792,7 @@ async function installUpdate(update) {
     await relaunch();
   } catch (err) {
     done();
-    console.error("update install failed:", err);
-    showToast("Update failed");
+    fail("Update failed", err, "update install failed");
   }
 }
 
@@ -1808,24 +1823,8 @@ function renderAboutSection() {
   host.append(groupTitle("Updates"));
   const updates = groupCard();
 
-  const toggle = el("button", {
-    class: "switch interactive",
-    role: "switch",
-    on: {
-      click: () => {
-        localStorage.setItem("set-autoupdate", autoUpdateOn() ? "off" : "on");
-        syncToggle();
-      },
-    },
-  });
-  const syncToggle = () => {
-    const on = autoUpdateOn();
-    toggle.classList.toggle("on", on);
-    toggle.setAttribute("aria-checked", on ? "true" : "false");
-  };
-  syncToggle();
-  const autoRow = groupRow();
-  autoRow.append(rowLabel("Automatically check for updates"), toggle);
+  const autoRow = settingRow("autoupdate");
+  markControl("autoupdate", getSetting("autoupdate"));
 
   const checkRow = groupRow();
   checkRow.append(
@@ -1851,7 +1850,7 @@ function renderAboutSection() {
       el("button", {
         class: "group-link",
         text: label,
-        on: { click: () => openUrl(url).catch(() => {}) },
+        on: { click: () => openUrl(url).catch(ignore("the OS declined; nothing to show")) },
       }),
     );
     credits.append(row);
@@ -2014,13 +2013,19 @@ function renderSyncSection() {
       el("button", {
         class: "group-link",
         text: "View on GitHub",
-        on: { click: () => openUrl(APP.worker.repoUrl).catch(() => {}) },
+        on: {
+          click: () =>
+            openUrl(APP.worker.repoUrl).catch(ignore("the OS declined; nothing to show")),
+        },
       }),
     ),
     el("button", {
       class: "sync-deploy",
       html: `${CLOUD_SVG}<span>Deploy to Cloudflare</span>`,
-      on: { click: () => openUrl(APP.worker.deployUrl).catch(() => {}) },
+      on: {
+        click: () =>
+          openUrl(APP.worker.deployUrl).catch(ignore("the OS declined; nothing to show")),
+      },
     }),
     el(
       "details",
@@ -2255,6 +2260,7 @@ function initSettings() {
   const cards = {};
   for (const name of Object.keys(SETTINGS)) {
     const sec = SETTINGS[name].section;
+    if (SETTINGS[name].placed) continue;
     if (!cards[sec]) {
       cards[sec] = groupCard();
       sectionEl(sec).append(cards[sec]);
@@ -2500,8 +2506,7 @@ async function revealDraft(path) {
   try {
     await revealItemInDir(path);
   } catch (err) {
-    console.error("reveal failed:", err);
-    showToast("Couldn't reveal the file");
+    fail("Couldn't reveal the file", err, "reveal failed");
   }
 }
 
@@ -2564,8 +2569,7 @@ async function exportDraft(id) {
     await invoke("write_text_file", { path, contents });
     showToast("Exported");
   } catch (err) {
-    console.error("export failed:", err);
-    showToast("Export failed");
+    fail("Export failed", err, "export failed");
   }
 }
 
@@ -2661,8 +2665,7 @@ async function shareDraft(id) {
     applyDraftMarks();
     copyText(info.url, "Public link copied — anyone with it can read this note");
   } catch (err) {
-    console.error("create_share failed:", err);
-    showToast("Couldn't create the share link");
+    fail("Couldn't create the share link", err, "create_share failed");
   }
 }
 
@@ -2687,8 +2690,7 @@ async function stopSharing(id) {
     applyDraftMarks();
     showToast("Sharing stopped — the link no longer works");
   } catch (err) {
-    console.error("revoke_share failed:", err);
-    showToast("Couldn't stop sharing");
+    fail("Couldn't stop sharing", err, "revoke_share failed");
   }
 }
 
@@ -3237,7 +3239,7 @@ async function init() {
       syncFailures += 1;
       clearTimeout(syncRetryTimer);
       const delay = Math.min(5 * 60 * 1000, SYNC_DEBOUNCE_MS * 2 ** (syncFailures - 1));
-      syncRetryTimer = setTimeout(() => invoke("sync_now").catch(() => {}), delay);
+      syncRetryTimer = setTimeout(() => syncNow(), delay);
     } else {
       const when = p.at ? new Date(p.at).toLocaleTimeString() : "";
       setSyncBar("Synced", "", when ? `Last synced ${when}` : "");
@@ -3247,14 +3249,12 @@ async function init() {
     }
   });
   await listen("sync:changed", () => refreshFromSync());
-  document
-    .getElementById("sidebar-sync")
-    .addEventListener("click", () => invoke("sync_now").catch(() => {}));
+  document.getElementById("sidebar-sync").addEventListener("click", () => syncNow());
   await refreshSyncChrome();
   refreshSyncedMarks();
   refreshShares();
   // Launch-time sync a couple seconds after boot (no-op when unconfigured).
-  setTimeout(() => invoke("sync_now").catch(() => {}), 2500);
+  setTimeout(() => syncNow(), 2500);
 
   window.addEventListener("beforeunload", () => {
     const d = drafts.get(currentId);
@@ -3263,14 +3263,18 @@ async function init() {
       d.content = text;
       if (!isEmpty(d)) invoke("save_draft", { draft: d });
     }
-    if (cloudConfigured) invoke("sync_now").catch(() => {}); // best-effort final sync
+    // A delete inside its undo window is the user's decision; quitting must
+    // not bring the draft back on the next launch.
+    for (const id of pendingDelete.keys())
+      invoke("delete_draft", { id }).catch(ignore("already gone"));
+    if (cloudConfigured) syncNow(); // best-effort final sync
   });
 
   focusEnd();
   requestAnimationFrame(() => document.body.classList.add("ready"));
 
   // Quietly check for updates shortly after launch (no-op until configured).
-  if (autoUpdateOn()) setTimeout(() => checkForUpdates({ silent: true }), 3000);
+  if (isOn("autoupdate")) setTimeout(() => checkForUpdates({ silent: true }), 3000);
 }
 
 window.addEventListener("DOMContentLoaded", init);

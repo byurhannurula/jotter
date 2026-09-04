@@ -65,6 +65,8 @@ export function relTime(ms, now = Date.now()) {
 
 /** Columns a hard tab stands for when deciding how much a line un-indents by. */
 const TAB_WIDTH = 4;
+/** What one indent step inserts, by the `tabsize` setting. */
+export const TAB_UNITS = { tab: "\t", 2: "  ", 4: "    " };
 
 /** Offset of the first character on the line containing `pos`. */
 function lineStartAt(text, pos) {
