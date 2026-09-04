@@ -273,6 +273,69 @@ describe("deleting", () => {
   });
 });
 
+describe("a note the user empties", () => {
+  // Found by the random-session test: the row left the sidebar but the store
+  // kept the old text, so the note came back on the next launch, and a sync
+  // could re-add it mid-session once the draft was dropped from memory.
+  beforeEach(async () => {
+    app = await boot(seed());
+  });
+
+  it("leaves the store, so the next launch does not bring it back", async () => {
+    await app.clickDraft("draft-a");
+    await app.type("");
+    await app.autosave();
+    expect(app.sidebarIds()).toEqual(["draft-b"]);
+    expect(app.host.store.has("draft-a")).toBe(false);
+  });
+
+  it("is not re-added by a sync after its tab is dropped for a known file", async () => {
+    // The exact fuzz sequence: the emptied draft is dropped from memory when
+    // its tab gives way to a file that already has one, and the next sync pull
+    // then sees the store's copy as a draft it had never heard of.
+    app = await boot({
+      drafts: [
+        ...seed().drafts,
+        {
+          id: "draft-s",
+          title: "",
+          content: "from disk",
+          file_path: "/notes/s.txt",
+          created_at: 1,
+          updated_at: 1,
+          pinned: false,
+          cloud: false,
+          file_mtime: 1000,
+        },
+      ],
+      files: { "/notes/s.txt": "from disk" },
+    });
+    await app.clickDraft("draft-a");
+    await app.type("");
+    await app.autosave();
+    app.host.dialog.next = "/notes/s.txt";
+    await app.menu("open");
+    expect(app.activeTabId()).toBe("draft-s");
+    await emit("sync:changed", null);
+    await settle();
+    await settle();
+    expect(app.sidebarIds()).not.toContain("draft-a");
+    expect(app.host.store.has("draft-a")).toBe(false);
+  });
+
+  it("keeps a named note that was emptied", async () => {
+    await app.clickDraft("draft-a");
+    await app.contextMenu("draft-a", "Rename…");
+    document.getElementById("prompt-input").value = "Shopping";
+    document.getElementById("prompt-ok").click();
+    await settle();
+    await app.type("");
+    await app.autosave();
+    expect(app.sidebarIds()).toContain("draft-a");
+    expect(app.host.store.has("draft-a")).toBe(true);
+  });
+});
+
 describe("closing, reopening, and cycling tabs", () => {
   beforeEach(async () => {
     app = await boot(seed());

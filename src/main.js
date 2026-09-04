@@ -518,6 +518,27 @@ let saveSeq = 0; // bumped as each write starts, so a sync pull can notice one
  *  came back as a conflict the user never caused. */
 const unsaved = new Set();
 
+/** Ids the store holds a file for. A draft the store has never seen must not
+ *  be deleted from it (a delete records a tombstone that would push a DELETE
+ *  for an id the cloud never had). */
+const stored = new Set();
+
+/** The store's copy of a draft that is no longer a note. Emptying a note took
+ *  its row out of the sidebar but left the old text in the store, so it came
+ *  back on the next launch and a sync could re-add it mid-session (found by
+ *  the random-session test). */
+async function forgetStored(id) {
+  unsaved.delete(id);
+  if (!stored.has(id)) return;
+  stored.delete(id);
+  try {
+    await invoke("delete_draft", { id });
+  } catch (err) {
+    stored.add(id);
+    console.error("delete_draft failed:", err);
+  }
+}
+
 /** Write a draft, one save at a time per draft.
  *
  *  Autosave and ⌘S can both call this within a few milliseconds. Running them
@@ -548,6 +569,7 @@ async function writeDraft(d, { sync = true } = {}) {
     // The command hands back the backing file's mtime so the next save can tell
     // whether anything else has written to it.
     d.file_mtime = await invoke("save_draft", { draft: d });
+    stored.add(d.id);
     if (sync) scheduleSync();
     return true;
   } catch (err) {
@@ -639,7 +661,9 @@ async function persist() {
   const text = editorTextFor(currentId);
   if (text === null) return;
   d.content = text; // pull the latest text at save time
-  if (isEmpty(d)) return; // don't write empty untouched blanks
+  // An emptied, unnamed draft is not a note any more: drop the store's copy
+  // rather than leaving it to come back at the next launch.
+  if (isEmpty(d)) return forgetStored(d.id);
   await saveDraft(d);
 }
 
@@ -707,7 +731,10 @@ function setClosedStack(next) {
  *  highlight), so it stays at the call site. */
 function runTabEffects(effects) {
   for (const e of effects) {
-    if (e.type === "delete") invoke("delete_draft", { id: e.id }).catch(ignore("already gone"));
+    if (e.type === "delete") {
+      stored.delete(e.id);
+      invoke("delete_draft", { id: e.id }).catch(ignore("already gone"));
+    }
     if (e.type === "forget") itemEls.delete(e.id);
   }
 }
@@ -919,6 +946,7 @@ async function deleteDraft(id) {
       console.error(e);
     }
     pendingDelete.delete(id);
+    stored.delete(id);
     revokeShareOnDelete(id); // now that the delete has committed, kill the link too
   }, 6000);
   pendingDelete.set(id, timer);
@@ -1059,7 +1087,11 @@ async function openFile() {
  *  with, or one left empty) from the open tabs and the store. No disk cleanup —
  *  an empty draft was never persisted. No-op if `id` is falsy or non-empty. */
 function dropScratch(id) {
-  runTabEffects(applyTabs(tabModel.dropScratch(tabState(), tabDeps, id)));
+  const dropped = tabModel.dropScratch(tabState(), tabDeps, id);
+  runTabEffects(applyTabs(dropped));
+  // The model only drops empty drafts, but "empty" can mean "the user cleared
+  // it", and the store may still hold what it said before.
+  if (dropped.effects.some((e) => e.type === "forget")) forgetStored(id);
 }
 
 /** Open a file with a known path — from the Open dialog, or from an OS request
@@ -1673,7 +1705,10 @@ async function moveDraftsDir(dir) {
     // Everything on screen came from the old folder, so reload the store.
     const list = await invoke("init_store");
     drafts.clear();
-    for (const d of list) drafts.set(d.id, d);
+    for (const d of list) {
+      drafts.set(d.id, d);
+      stored.add(d.id);
+    }
     // Reopening a closed tab can't work across a store change.
     closedStack.length = 0;
     openTabs = openTabs.filter((id) => drafts.has(id));
@@ -2244,6 +2279,7 @@ async function refreshFromSync() {
   );
   for (const upd of updates) {
     drafts.set(upd.id, upd);
+    stored.add(upd.id);
     unsaved.delete(upd.id); // the store's copy is now the model's copy
   }
   if (editorContent !== null) showInEditor(currentId, editorContent);
@@ -3081,7 +3117,10 @@ async function init() {
     homePath = "";
   }
   const list = await invoke("init_store");
-  for (const d of list) drafts.set(d.id, d);
+  for (const d of list) {
+    drafts.set(d.id, d);
+    stored.add(d.id);
+  }
 
   // Only the E2E build answers true; the hook lets a spec drive menu items.
   if (await invoke("is_e2e").catch(() => false)) window.__jotter = { menu: onMenu };
