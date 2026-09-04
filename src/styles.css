@@ -305,6 +305,12 @@ body.resizing {
   transition: color 0.14s ease;
 }
 
+/* The <symbol> definitions the icons in index.html and main.js both point at.
+   Never drawn itself; `display:none` does not stop a <use> from resolving. */
+#icon-sprite {
+  display: none;
+}
+
 .draft-icon svg {
   display: block;
 }

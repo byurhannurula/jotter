@@ -8,6 +8,40 @@
     <script type="module" src="/main.js" defer></script>
   </head>
   <body class="sidebar-hidden">
+    <!-- The two icons the page draws in more than one place. Everything else is
+         used once and stays where it is drawn; a symbol per one-off icon would
+         only move the markup, not remove a copy. `main.js` references these by
+         the same ids, so an icon is defined once for both. -->
+    <svg id="icon-sprite" aria-hidden="true" hidden>
+      <symbol
+        id="i-pencil"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M13 21h8" />
+        <path d="m15 5 4 4" />
+        <path
+          d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
+        />
+      </symbol>
+      <symbol
+        id="i-cloud-up"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M12 13v8" />
+        <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+        <path d="m8 17 4-4 4 4" />
+      </symbol>
+    </svg>
     <div class="app">
       <aside class="sidebar">
         <div class="sidebar-inner">
@@ -19,20 +53,8 @@
               aria-label="Sync now"
               hidden
             >
-              <svg
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M12 13v8" />
-                <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
-                <path d="m8 17 4-4 4 4" />
+              <svg width="16" height="16" aria-hidden="true">
+                <use href="#i-cloud-up" />
               </svg>
             </button>
             <button id="new-draft" class="icon-btn" title="New draft (⌘N)" aria-label="New draft">
@@ -239,37 +261,11 @@
             <span>General</span>
           </button>
           <button class="rail-item" data-section="editor">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M13 21h8" />
-              <path d="m15 5 4 4" />
-              <path
-                d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"
-              />
-            </svg>
+            <svg aria-hidden="true"><use href="#i-pencil" /></svg>
             <span>Editor</span>
           </button>
           <button class="rail-item" data-section="sync">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 13v8" />
-              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
-              <path d="m8 17 4-4 4 4" />
-            </svg>
+            <svg aria-hidden="true"><use href="#i-cloud-up" /></svg>
             <span>Cloud</span>
           </button>
           <button class="rail-item" data-section="shortcuts">
