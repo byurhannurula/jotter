@@ -1,8 +1,9 @@
 name: E2E
 
-# The real app under WebdriverIO, on a macOS runner (billed at 10x), so this is
-# started by hand or by the nightly schedule rather than on every push. The
-# binary is built with the `e2e` Cargo feature, which release.yml never passes.
+# The real app under WebdriverIO on all three OSes, started by hand or by the
+# nightly schedule rather than on every push (macOS is billed at 10x, and a
+# debug build plus three launches takes minutes). The binary is built with the
+# `e2e` Cargo feature, which release.yml never passes.
 on:
   workflow_dispatch:
   schedule:
@@ -10,8 +11,12 @@ on:
 
 jobs:
   e2e:
-    runs-on: macos-15
-    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -23,13 +28,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
       - run: pnpm install --frozen-lockfile
       - run: pnpm e2e:build
-      - run: pnpm e2e
+      # The embedded driver is auto-detected on macOS only; elsewhere the
+      # service needs the port spelled out. Linux has no display on a runner.
+      - name: Run the suite
+        if: runner.os == 'Linux'
+        run: xvfb-run -a pnpm e2e
+        env:
+          TAURI_WEBDRIVER_PORT: "4445"
+      - name: Run the suite
+        if: runner.os != 'Linux'
+        run: pnpm e2e
+        env:
+          TAURI_WEBDRIVER_PORT: "4445"
       - name: Keep screenshots and logs from a failed run
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-logs
+          name: e2e-logs-${{ matrix.os }}
           path: e2e/logs
           if-no-files-found: ignore

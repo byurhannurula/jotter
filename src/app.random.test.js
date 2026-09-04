@@ -51,13 +51,17 @@ function seedDrafts() {
       mk("b", "bravo text", 2),
       mk("f", "file text", 1, `/notes/${bootCount}/f.txt`),
     ],
-    files: { [`/notes/${bootCount}/f.txt`]: "file text" },
+    files: {
+      [`/notes/${bootCount}/f.txt`]: "file text",
+      [`/notes/${bootCount}/extra.txt`]: "a file nobody opened yet", // for OpenFile
+    },
   };
 }
 
 /** What the app should look like, from the test's point of view. */
 class Model {
-  constructor(drafts) {
+  constructor(drafts, files = {}) {
+    this.paths = Object.keys(files); // files on disk the open dialog can pick
     this.content = new Map(drafts.map((d) => [d.id, d.content]));
     this.title = new Map();
     this.file = new Map(drafts.filter((d) => d.file_path).map((d) => [d.id, d.file_path]));
@@ -525,6 +529,45 @@ const FocusMode = cmd("FocusMode", {
   },
 });
 
+/** File > Open, with the dialog answering a path from the seed. An already
+ *  open file gets its tab focused; a blank scratch tab is reused in place;
+ *  otherwise a new file draft opens beside the others and is registered in
+ *  the store without the file being rewritten. */
+const OpenFile = cmd("OpenFile", {
+  // Kept out of half-deleted and conflicted states, where the app's "already
+  // open" lookup and the model would need a second set of rules.
+  check: (m) => m.undoable.length === 0 && m.conflict === null,
+  run: async (m, real, i) => {
+    const path = m.paths[i % m.paths.length];
+    const scratch = m.saved(m.active) ? null : m.active;
+    real.host.dialog.next = path;
+    await real.menu("open");
+    flushed(m, real);
+    const existing = [...m.file.entries()].find(([id, p]) => p === path && !m.deleted.has(id))?.[0];
+    if (existing !== undefined) {
+      if (scratch && scratch !== existing) m.open = m.open.filter((t) => t !== scratch);
+      if (!m.open.includes(existing)) m.open.push(existing);
+      switchTo(m, real, existing);
+      return;
+    }
+    const id = scratch ?? real.activeTabId();
+    m.content.set(id, real.host.disk.get(path));
+    m.file.set(id, path);
+    m.knownMtime.set(id, real.host.mtimes.get(path));
+    m.touch(id);
+    if (!m.open.includes(id)) m.open.push(id);
+    m.active = id;
+  },
+});
+
+/** Flip one toggle setting mid-session. None of them may touch the text. */
+const ToggleSetting = cmd("ToggleSetting", {
+  run: async (m, real, name) => {
+    document.getElementById(`set-${name}`).click();
+    await settle();
+  },
+});
+
 const commands = [
   fc.nat(5).map((i) => new ClickDraft(i)),
   fc.constant(new NewTab()),
@@ -556,6 +599,10 @@ const commands = [
     .map((a) => new ReplaceAll(a)),
   fc.constant(new Preview()),
   fc.constant(new FocusMode()),
+  fc.nat(3).map((i) => new OpenFile(i)),
+  fc
+    .constantFrom("statusbar", "sidebarBtn", "previewBtn", "focusFull")
+    .map((n) => new ToggleSetting(n)),
 ];
 
 let real = null;
@@ -575,7 +622,7 @@ describe("random sessions", () => {
             if (drain > 0) await sleep(drain); // let the previous session's autosave land
             const { drafts, files } = seedDrafts();
             real = await boot({ drafts, files });
-            const model = new Model(drafts);
+            const model = new Model(drafts, files);
             model.adoptBlank(real.activeTabId());
             return { model, real };
           };
@@ -585,6 +632,6 @@ describe("random sessions", () => {
       );
     },
     // A session takes up to ~3 s (boot, waits, the autosave drain); scale the limit with the count.
-    30_000 + RUNS * 4_000,
+    30_000 + RUNS * 8_000,
   );
 });

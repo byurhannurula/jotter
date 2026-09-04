@@ -114,7 +114,9 @@ push. Release runs Rust on all three OSes.
 
 **Rust host (`src-tauri/src/lib.rs`)**
 
-- Drafts-store commands: `init_store`, `save_draft`, `delete_draft`, `read_text_file`,
+- Drafts-store commands: `init_store`, `save_draft` (entry and file, mtime-checked),
+  `save_meta` and `save_entry` (entry only: a rename, a pin, or a file just opened,
+  where rewriting the file would look like an edit), `delete_draft`, `read_text_file`,
   `write_text_file`, `canonical_path`, `write_conflict_copy`, `get_drafts_dir`,
   `set_drafts_dir`, `open_drafts_dir`. Sync: `sync_now`, `list_drafts`,
   `synced_ids`, `set_cloud`, the `*_sync_config` pair, and the share

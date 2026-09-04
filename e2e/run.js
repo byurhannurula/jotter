@@ -18,7 +18,8 @@ import { join } from "node:path";
 
 const here = import.meta.dirname;
 const specsDir = join(here, "specs");
-const wdio = join(here, "..", "node_modules", ".bin", "wdio");
+const win = process.platform === "win32";
+const wdio = join(here, "..", "node_modules", ".bin", win ? "wdio.cmd" : "wdio");
 
 const dataDir = process.env.JOTTER_DATA_DIR ?? mkdtempSync(join(tmpdir(), "jotter-e2e-"));
 const only = process.argv[2];
@@ -47,6 +48,7 @@ for (const group of groups) {
     ["run", join(here, "wdio.conf.js"), "--spec", join(dir, "*.spec.js")],
     {
       stdio: "inherit",
+      shell: win, // .cmd shims need a shell
       env: { ...process.env, JOTTER_DATA_DIR: dataDir, JOTTER_E2E_ARGS: JSON.stringify(args) },
     },
   );

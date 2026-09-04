@@ -38,6 +38,7 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
   const saves = [];
   const deletes = [];
   const events = []; // timestamped notes from tests, alongside the saves
+  const dialog = { next: null }; // what the next open dialog returns
 
   const handlers = {
     init_store: () => [...store.values()].map((d) => ({ ...d })),
@@ -85,6 +86,17 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
       disk.set(copy, contents);
       return copy;
     },
+    save_entry: ({ draft }) => {
+      store.set(draft.id, { ...draft });
+      saves.push({
+        id: draft.id,
+        content: draft.content,
+        file_path: draft.file_path,
+        at: Date.now(),
+      });
+    },
+    // The open dialog answers with whatever the test put in `dialog.next`.
+    "plugin:dialog|open": () => dialog.next,
     canonical_path: ({ path }) => path,
     take_opened_files: () => [],
     get_sync_config: () => ({ enabled: false, url: "", has_token: false }),
@@ -109,7 +121,7 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
 
   // `handlers` is exposed so a test can wrap one command, e.g. to give
   // list_drafts the latency a real IPC round trip has.
-  return { store, disk, mtimes, saves, deletes, events, editOutside, handlers };
+  return { store, disk, mtimes, saves, deletes, events, editOutside, handlers, dialog };
 }
 
 /** Load a fresh main.js and run its init() against a fresh body.

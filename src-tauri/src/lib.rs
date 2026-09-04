@@ -455,6 +455,14 @@ fn save_draft(app: AppHandle, draft: Draft) -> Result<Option<i64>, String> {
     Ok(mtime)
 }
 
+/// Store entry only, the text file untouched. For a file the user just opened:
+/// the store has to learn about it now, but rewriting an unedited file would
+/// look like an edit to a sync client and bump its mtime for nothing.
+#[tauri::command]
+fn save_entry(app: AppHandle, draft: Draft) -> Result<(), String> {
+    write_entry_in(&drafts_dir(&app)?, &draft)
+}
+
 /// Read one stored entry, change it, write it back — entry only, the text
 /// file is never touched. For changes to what the store knows about a note
 /// (its name, its pin, its cloud flag) rather than to the note itself, where
@@ -1730,6 +1738,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             init_store,
             is_e2e,
+            save_entry,
             save_draft,
             delete_draft,
             read_text_file,

@@ -145,9 +145,21 @@ export function indentEdit(text, start, end, unit, outdent = false) {
 /** Whether a draft matches a sidebar / quick-switcher query: case-insensitive,
  *  over the display title and the content. `q` is already trimmed and
  *  lower-cased; an empty query matches everything. One rule for both surfaces. */
+// Lower-cased content per draft, reused across keystrokes while the content
+// is the same string. The sidebar and the switcher both search on every key.
+const lowered = new WeakMap(); // draft -> { src, lower }
+
+function lowerContent(d) {
+  const hit = lowered.get(d);
+  if (hit && hit.src === d.content) return hit.lower;
+  const lower = d.content.toLowerCase();
+  lowered.set(d, { src: d.content, lower });
+  return lower;
+}
+
 export function draftMatches(d, q) {
   if (!q) return true;
-  return draftTitle(d).toLowerCase().includes(q) || d.content.toLowerCase().includes(q);
+  return draftTitle(d).toLowerCase().includes(q) || lowerContent(d).includes(q);
 }
 
 /** 1-based line and column of `offset` in `text`. Scans only up to the offset

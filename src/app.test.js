@@ -117,6 +117,60 @@ describe("opening drafts", () => {
     expect(app.editor.value).toBe("edited outside");
   });
 
+  it("Open from the menu reuses the blank scratch tab and puts the file in the store", async () => {
+    app = await boot({ ...seed(), files: { "/notes/n.txt": "from disk" } });
+    expect(app.tabIds().length).toBe(1); // the launch blank
+    app.host.dialog.next = "/notes/n.txt";
+    await app.menu("open");
+    expect(app.tabIds().length).toBe(1); // reused, not added beside
+    expect(app.editor.value).toBe("from disk");
+    const stored = [...app.host.store.values()].find((d) => d.file_path === "/notes/n.txt");
+    expect(stored?.content).toBe("from disk"); // would be missing on the next launch otherwise
+    expect(app.host.disk.get("/notes/n.txt")).toBe("from disk"); // and the file was not rewritten
+    expect(app.host.mtimes.get("/notes/n.txt")).toBe(1000);
+  });
+
+  it("Open of an already open file focuses its tab instead of opening it twice", async () => {
+    app = await boot({ ...seed(), files: { "/notes/n.txt": "from disk" } });
+    app.host.dialog.next = "/notes/n.txt";
+    await app.menu("open");
+    await app.clickDraft("draft-a");
+    expect(app.tabIds().length).toBe(2);
+    await app.menu("open");
+    expect(app.tabIds().length).toBe(2);
+    expect(app.editor.value).toBe("from disk");
+  });
+
+  it("opening a known file keeps the reopen history", async () => {
+    // Found by the random-session test: the no-op scratch drop handed the
+    // live tab state back, and writing it in place emptied the closed stack.
+    app = await boot({
+      drafts: [
+        ...seed().drafts,
+        {
+          id: "draft-k",
+          title: "",
+          content: "known file",
+          file_path: "/notes/k.txt",
+          created_at: 1,
+          updated_at: 1,
+          pinned: false,
+          cloud: false,
+          file_mtime: 1000,
+        },
+      ],
+      files: { "/notes/k.txt": "known file" },
+    });
+    await app.clickDraft("draft-a");
+    await app.menu("close_tab");
+    await app.clickDraft("draft-a");
+    app.host.dialog.next = "/notes/k.txt";
+    await app.menu("open");
+    expect(app.activeTabId()).toBe("draft-k");
+    await app.menu("reopen_tab");
+    expect(app.activeTabId()).toBe("draft-a");
+  });
+
   it("re-reads a file-backed draft from disk when it is opened", async () => {
     app = await boot({
       drafts: [

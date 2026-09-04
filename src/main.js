@@ -688,10 +688,18 @@ const tabDeps = { drafts, makeBlank: createBlankDraft };
 function applyTabs({ state, effects }) {
   openTabs = state.openTabs;
   currentId = state.currentId;
-  // closedStack is a const binding shared elsewhere, so replace in place.
-  closedStack.length = 0;
-  closedStack.push(...state.closedStack);
+  setClosedStack(state.closedStack);
   return effects;
+}
+
+/** closedStack is a const binding shared elsewhere, so it is replaced in
+ *  place. Copy first: a model that returns the state unchanged hands back the
+ *  live array itself, and clearing it before reading it emptied the reopen
+ *  history on every file open (found by the random-session test). */
+function setClosedStack(next) {
+  const items = [...next];
+  closedStack.length = 0;
+  closedStack.push(...items);
 }
 
 /** Run the effects a transition asked for, except "activate" — every caller
@@ -848,8 +856,7 @@ async function closeTab(id) {
  *  switching. Returns the effects for runTabEffects. */
 function commitTabs({ state, effects }) {
   openTabs = state.openTabs;
-  closedStack.length = 0;
-  closedStack.push(...state.closedStack);
+  setClosedStack(state.closedStack);
   runTabEffects(effects);
   return effects;
 }
@@ -866,8 +873,7 @@ function cycleTab(dir) {
 function reopenClosedTab() {
   const { state, effects } = tabModel.reopenClosedTab(tabState(), tabDeps);
   // Only the stack is written back; openInTab does the tab and activation work.
-  closedStack.length = 0;
-  closedStack.push(...state.closedStack);
+  setClosedStack(state.closedStack);
   const opened = effects.find((e) => e.type === "activate");
   if (opened) openInTab(opened.id);
 }
@@ -1119,7 +1125,12 @@ async function openPathInTab(path) {
   renderTabs();
   renderList();
   updateWindowTitle();
-  await persist();
+  // The store learns about the file now, entry only: nothing was typed, and
+  // rewriting the file would look like an edit to a sync client. Without this
+  // the file was in the sidebar only until the next launch.
+  await invoke("save_entry", { draft: drafts.get(currentId) }).catch((err) =>
+    console.error("save_entry failed:", err),
+  );
   focusEnd();
 }
 
