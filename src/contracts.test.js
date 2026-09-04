@@ -9,6 +9,7 @@ const css = read("src/styles.css");
 const rust = read("src-tauri/src/lib.rs");
 const mainJs = read("src/main.js");
 const conf = JSON.parse(read("src-tauri/tauri.conf.json"));
+const html = read("src/index.html");
 
 describe("title bar height", () => {
   it("is the same in CSS and in the traffic-light maths", () => {
@@ -76,5 +77,25 @@ describe("theme blocks", () => {
     expect([...light].sort()).toEqual([...dark].sort());
     expect([...media].sort()).toEqual([...dark].sort());
     for (const t of dark) expect(root.has(t), `--${t} has no :root default`).toBe(true);
+  });
+});
+
+describe("the shipped style-src", () => {
+  const csp = conf.app.security.csp;
+
+  it("has no 'unsafe-inline', so the page must carry no inline style", () => {
+    expect(csp).toContain("style-src 'self'");
+    expect(csp).not.toContain("style-src 'self' 'unsafe-inline'");
+    // A `style=` attribute or a <style> block in the page is refused outright
+    // by that policy — and only in a release build, where the dev server's
+    // looser policy is gone, so nothing in `pnpm tauri dev` would show it.
+    // Styling from JS goes through the CSSOM (`el.style.x = ...`), which the
+    // policy does not police.
+    expect(html).not.toMatch(/\sstyle="/);
+    expect(html).not.toMatch(/<style[\s>]/);
+  });
+
+  it("renders markdown with raw HTML off, so a note cannot carry one either", () => {
+    expect(mainJs).toMatch(/new MarkdownIt\(\{[^}]*html:\s*false/);
   });
 });
