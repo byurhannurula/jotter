@@ -38,6 +38,7 @@ import {
 const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
 
 const AUTOSAVE_DELAY = 400; // ms after last keystroke
+const LAST_SYNC_WAIT = 2500; // ms a quit waits on the final sync before going anyway
 const TEXT_EXTS = ["txt", "md", "markdown", "text", "log"];
 const TEXT_FILTERS = [
   { name: "Text", extensions: TEXT_EXTS },
@@ -665,6 +666,35 @@ async function persist() {
   // rather than leaving it to come back at the next launch.
   if (isEmpty(d)) return forgetStored(d.id);
   await saveDraft(d);
+}
+
+/** Everything that has to reach disk before the app goes: the text still in the
+ *  editor, the deletes still inside their undo window, and one last sync.
+ *
+ *  Called from the host's `before-quit`, which waits for `confirm_quit` — so
+ *  every path through here has to end at it, or quitting stalls until the
+ *  host's grace period runs out. The sync is raced against a short timeout:
+ *  it is the one step that talks to the network, and a slow server must not
+ *  hold the window open.
+ */
+async function lastWrites() {
+  try {
+    await flush();
+    // A delete inside its undo window is the user's decision; quitting must
+    // not bring the draft back on the next launch.
+    await Promise.all(
+      [...pendingDelete.keys()].map((id) =>
+        invoke("delete_draft", { id }).catch(ignore("already gone")),
+      ),
+    );
+    if (cloudConfigured) {
+      await Promise.race([syncNow(), new Promise((r) => setTimeout(r, LAST_SYNC_WAIT))]);
+    }
+  } catch (err) {
+    console.error("last writes before quit failed:", err);
+  } finally {
+    await invoke("confirm_quit").catch(ignore("the host is already going"));
+  }
 }
 
 function scheduleSave() {
@@ -3303,19 +3333,9 @@ async function init() {
   // Launch-time sync a couple seconds after boot (no-op when unconfigured).
   setTimeout(() => syncNow(), 2500);
 
-  window.addEventListener("beforeunload", () => {
-    const d = drafts.get(currentId);
-    const text = d && unsaved.has(d.id) ? editorTextFor(currentId) : null;
-    if (d && text !== null) {
-      d.content = text;
-      if (!isEmpty(d)) invoke("save_draft", { draft: d });
-    }
-    // A delete inside its undo window is the user's decision; quitting must
-    // not bring the draft back on the next launch.
-    for (const id of pendingDelete.keys())
-      invoke("delete_draft", { id }).catch(ignore("already gone"));
-    if (cloudConfigured) syncNow(); // best-effort final sync
-  });
+  // The host holds the quit open until `confirm_quit`, so unlike `beforeunload`
+  // this can wait for its own writes.
+  await listen("before-quit", () => lastWrites());
 
   focusEnd();
   requestAnimationFrame(() => document.body.classList.add("ready"));

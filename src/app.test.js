@@ -678,3 +678,70 @@ describe("a mixed session", () => {
     expect(blankOverwrites(app)).toEqual([]);
   });
 });
+
+describe("quitting", () => {
+  const quitSeed = () => ({
+    drafts: [
+      {
+        id: "q-a",
+        title: "",
+        content: "alpha text",
+        file_path: null,
+        created_at: 1,
+        updated_at: 2,
+        pinned: false,
+        cloud: false,
+      },
+      {
+        id: "q-b",
+        title: "",
+        content: "bravo text",
+        file_path: null,
+        created_at: 1,
+        updated_at: 1,
+        pinned: false,
+        cloud: false,
+      },
+    ],
+  });
+
+  it("writes what is still in the editor, commits a pending delete, and answers the host", async () => {
+    app = await boot(quitSeed());
+    let confirmed = 0;
+    const realConfirm = app.host.handlers.confirm_quit;
+    app.host.handlers.confirm_quit = (args) => {
+      confirmed += 1;
+      return realConfirm(args);
+    };
+
+    await app.clickDraft("q-a");
+    await app.type("typed, and never autosaved");
+    await app.contextMenu("q-b", "Delete"); // inside its undo window: not on disk yet
+    expect(app.host.deletes).not.toContain("q-b");
+
+    await emit("before-quit", null);
+    await settle();
+
+    expect(app.host.store.get("q-a").content).toBe("typed, and never autosaved");
+    expect(app.host.deletes).toContain("q-b");
+    expect(confirmed).toBe(1);
+  });
+
+  it("answers the host even when a last write fails", async () => {
+    app = await boot(quitSeed());
+    let confirmed = 0;
+    app.host.handlers.save_draft = () => {
+      throw new Error("disk full");
+    };
+    app.host.handlers.confirm_quit = () => {
+      confirmed += 1;
+    };
+    await app.clickDraft("q-a");
+    await app.type("this save will fail");
+
+    await emit("before-quit", null);
+    await settle();
+
+    expect(confirmed).toBe(1); // or the app hangs until the host's grace period
+  });
+});

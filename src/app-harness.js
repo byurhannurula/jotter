@@ -101,6 +101,7 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
     pick_folder: () => dialog.next,
     canonical_path: ({ path }) => path,
     take_opened_files: () => [],
+    confirm_quit: () => undefined,
     get_sync_config: () => ({ enabled: false, url: "", has_token: false }),
     synced_ids: () => [],
     refresh_shares: () => ({}),

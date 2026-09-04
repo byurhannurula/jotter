@@ -1848,6 +1848,67 @@ fn save_window(win: &tauri::WebviewWindow) {
     }
 }
 
+// --- Quitting ---------------------------------------------------------------
+//
+// The last keystrokes, a delete still inside its undo window, and a final sync
+// all live in the webview, and `beforeunload` cannot wait for them: the page is
+// already being torn down, so its `invoke`s race the process. So the host holds
+// the quit instead — it asks the page to finish, and the page says when it has.
+
+/// Where a quit has got to: nobody has asked yet, the page has been asked, or
+/// the last writes are done (either the page said so, or it was waited out).
+const QUIT_IDLE: u8 = 0;
+const QUIT_ASKED: u8 = 1;
+const QUIT_DONE: u8 = 2;
+
+#[derive(Default)]
+struct Quitting(std::sync::atomic::AtomicU8);
+
+/// How long the host waits for the page before quitting anyway. Long enough for
+/// a save and a sync on a slow link, short enough that a page that never answers
+/// does not look like a hang.
+const QUIT_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Ask the page to finish its last writes. Returns true while the quit should be
+/// held back, false once there is nothing left to wait for.
+fn hold_for_last_writes(app: &AppHandle) -> bool {
+    let state = app.state::<Quitting>();
+    match state
+        .0
+        .compare_exchange(QUIT_IDLE, QUIT_ASKED, Ordering::SeqCst, Ordering::SeqCst)
+    {
+        // Already asked (a window close and the exit behind it are one quit),
+        // or already finished.
+        Err(seen) => seen != QUIT_DONE,
+        Ok(_) => {
+            let _ = app.emit("before-quit", ());
+            let handle = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(QUIT_GRACE);
+                let state = handle.state::<Quitting>();
+                if state.0.swap(QUIT_DONE, Ordering::SeqCst) != QUIT_DONE {
+                    handle.exit(0);
+                }
+            });
+            true
+        }
+    }
+}
+
+/// The page has written everything it had. Called from its `before-quit`
+/// handler; the quit waits on this, so the page must reach it on every path out
+/// of that handler, error or not.
+#[tauri::command]
+fn confirm_quit(app: AppHandle) {
+    if app.state::<Quitting>().0.swap(QUIT_DONE, Ordering::SeqCst) == QUIT_DONE {
+        return; // the grace period won; the app is already on its way out
+    }
+    if let Some(win) = main_window(&app) {
+        save_window(&win);
+    }
+    app.exit(0);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // `mut` is used only on Windows/Linux (single-instance plugin); on macOS the
@@ -1885,6 +1946,7 @@ pub fn run() {
         })
         .manage(Mutex::new(OpenedFiles::default()))
         .manage(Allowed::default())
+        .manage(Quitting::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -1946,7 +2008,8 @@ pub fn run() {
             take_opened_files,
             pick_file,
             pick_save_path,
-            pick_folder
+            pick_folder,
+            confirm_quit
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -1955,11 +2018,16 @@ pub fn run() {
             // launch restores it (see restore_window / save_window).
             tauri::RunEvent::WindowEvent {
                 label,
-                event: tauri::WindowEvent::CloseRequested { .. },
+                event: tauri::WindowEvent::CloseRequested { ref api, .. },
                 ..
             } => {
                 if let Some(win) = app_handle.get_webview_window(&label) {
                     save_window(&win);
+                }
+                // Closing the window destroys the webview, so the page has to
+                // finish before the close goes through, not after it.
+                if hold_for_last_writes(app_handle) {
+                    api.prevent_close();
                 }
             }
             // The traffic lights' container is anchored to the window's top edge by
@@ -1985,9 +2053,12 @@ pub fn run() {
                     allow_path(app_handle, &path_str(p));
                 }
             }
-            tauri::RunEvent::ExitRequested { .. } => {
+            tauri::RunEvent::ExitRequested { ref api, .. } => {
                 if let Some(win) = main_window(app_handle) {
                     save_window(&win);
+                }
+                if hold_for_last_writes(app_handle) {
+                    api.prevent_exit();
                 }
             }
             // macOS delivers "open this file" here (double-click / "Open With"),
