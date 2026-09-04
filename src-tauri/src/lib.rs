@@ -230,20 +230,55 @@ fn draft_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(format!("{id}.json"))
 }
 
+/// Read the whole store: one file per draft, parsed in parallel.
+///
+/// This is on the launch path, and a store is many small files — the cost is
+/// almost all per-file latency, not bytes, so the reads are split across a few
+/// threads instead of waiting for each in turn. Order is restored by the caller
+/// (`read_all_drafts` sorts), so the split does not have to be stable.
 fn read_all_drafts_in(dir: &Path) -> Result<Vec<Draft>, String> {
-    let mut out = Vec::new();
-    for entry in fs::read_dir(dir).map_err(msg)?.flatten() {
-        let path = entry.path();
-        if !is_json(&path) {
-            continue;
-        }
-        if let Ok(text) = fs::read_to_string(&path) {
-            if let Ok(draft) = serde_json::from_str::<Draft>(&text) {
-                out.push(draft);
-            }
-        }
+    let paths: Vec<PathBuf> = fs::read_dir(dir)
+        .map_err(msg)?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| is_json(p))
+        .collect();
+
+    let lanes = std::thread::available_parallelism()
+        .map(|n| n.get().min(8))
+        .unwrap_or(4)
+        .min(paths.len().max(1));
+    if lanes < 2 {
+        return Ok(paths.iter().filter_map(|p| parse_draft(p)).collect());
     }
+
+    let chunk = paths.len().div_ceil(lanes);
+    let mut out = Vec::with_capacity(paths.len());
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = paths
+            .chunks(chunk)
+            .map(|part| {
+                scope.spawn(move || {
+                    part.iter()
+                        .filter_map(|p| parse_draft(p))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for h in handles {
+            // A panic in a lane is a bug, not a store the user can fix; the
+            // empty result keeps the rest of the store readable.
+            out.extend(h.join().unwrap_or_default());
+        }
+    });
     Ok(out)
+}
+
+/// One stored entry, or nothing when the file is unreadable or not a draft.
+/// A damaged file is skipped rather than failing the whole launch.
+fn parse_draft(path: &Path) -> Option<Draft> {
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Draft>(&text).ok()
 }
 
 /// Write `contents` to `path` without ever leaving it half-written.
