@@ -1092,8 +1092,14 @@ function flushUi() {
 
   updateWindowTitle();
   updateStatus();
-  if (searchQuery || !itemEls.has(currentId) || isEmpty(d)) renderList();
-  else refreshActiveItem();
+  // Typing changes one draft, so the list only has to be rebuilt when that
+  // draft joins or leaves it — it emptied, it filled, or a search it is
+  // filtered by started or stopped matching. Otherwise its own row is the only
+  // one that changed, and `refreshActiveItem` also re-sorts it within its group.
+  const listed = itemEls.has(currentId);
+  const belongs = isSaved(d) && matchesSearch(d);
+  if (listed !== belongs) renderList();
+  else if (listed) refreshActiveItem();
 
   if (find.open) {
     computeMatches();

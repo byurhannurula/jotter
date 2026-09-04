@@ -745,3 +745,46 @@ describe("quitting", () => {
     expect(confirmed).toBe(1); // or the app hangs until the host's grace period
   });
 });
+
+describe("searching", () => {
+  beforeEach(async () => {
+    app = await boot(seed());
+  });
+
+  const search = async (q) => {
+    const box = document.getElementById("search");
+    box.value = q;
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+  };
+
+  const rowFor = (id) => document.querySelector(`#draft-list .draft-item[data-id="${id}"]`);
+
+  it("keeps the rows it has while the note being typed in still matches", async () => {
+    await app.clickDraft("draft-a");
+    await search("alpha");
+    expect(app.sidebarIds()).toEqual(["draft-a"]);
+
+    const row = rowFor("draft-a");
+    await app.type("alpha text, and a second line");
+    // Same element, not a rebuilt one: a keystroke under an active search used
+    // to re-render every row in the sidebar.
+    expect(rowFor("draft-a")).toBe(row);
+    expect(row.textContent).toContain("and a second line");
+  });
+
+  it("rebuilds when the note being typed in leaves the results", async () => {
+    await app.clickDraft("draft-a");
+    await search("alpha");
+    await app.type("nothing matching here");
+    expect(app.sidebarIds()).toEqual([]);
+  });
+
+  it("rebuilds when the note being typed in joins the results", async () => {
+    await app.clickDraft("draft-b");
+    await search("alpha");
+    expect(app.sidebarIds()).toEqual(["draft-a"]);
+    await app.type("bravo text with alpha in it");
+    expect(app.sidebarIds()).toContain("draft-b");
+  });
+});
