@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/**/*.test.js"],
+    include: ["src/**/*.test.js", "scripts/**/*.test.mjs"],
     environment: "node",
     // Node 22+ defines a `localStorage` global that is undefined unless the
     // process starts with --localstorage-file, and it shadows happy-dom's.

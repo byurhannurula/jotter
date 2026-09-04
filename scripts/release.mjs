@@ -10,6 +10,7 @@
 //   package.json · src-tauri/tauri.conf.json · src-tauri/Cargo.toml · src/lib/meta.js
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { bumpVersion, setVersion, VERSION_FILES } from "./lib/semver.mjs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -46,26 +47,12 @@ if (!dry) run("git pull --ff-only");
 
 // 1. Compute the next version from package.json.
 const pkg = JSON.parse(readFileSync(path("package.json"), "utf8"));
-const [maj, min, pat] = pkg.version.split(".").map(Number);
-const next =
-  bump === "major"
-    ? `${maj + 1}.0.0`
-    : bump === "minor"
-      ? `${maj}.${min + 1}.0`
-      : `${maj}.${min}.${pat + 1}`;
+const next = bumpVersion(pkg.version, bump);
 console.log(`\n  ${pkg.version} -> ${next}  (${bump})\n`);
 
 // 2. Write it into every file (targeted replacements → minimal diffs).
-const edits = [
-  ["package.json", /("version":\s*")[^"]+/],
-  ["src-tauri/tauri.conf.json", /("version":\s*")[^"]+/],
-  ["src-tauri/Cargo.toml", /(^version\s*=\s*")[^"]+/m],
-  ["src/lib/meta.js", /(version:\s*")[^"]+/],
-];
-for (const [file, re] of edits) {
-  const before = readFileSync(path(file), "utf8");
-  const after = before.replace(re, `$1${next}`);
-  if (after === before) throw new Error(`version pattern not found in ${file}`);
+for (const [file, re] of VERSION_FILES) {
+  const after = setVersion(readFileSync(path(file), "utf8"), re, next, file);
   console.log(`  ${dry ? "would update" : "updated"} ${file}`);
   if (!dry) writeFileSync(path(file), after);
 }
