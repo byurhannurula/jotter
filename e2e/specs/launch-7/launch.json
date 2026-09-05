@@ -1,0 +1,12 @@
+{
+  "data": "fresh",
+  "files": {
+    "kept.txt": "text that was already on disk",
+    "drafts/draft-old-plain.json": "{\n  \"id\": \"draft-old-plain\",\n  \"title\": \"Shopping\",\n  \"content\": \"milk\\nbread\",\n  \"file_path\": null,\n  \"created_at\": 1735689600000,\n  \"updated_at\": 1735689600000,\n  \"pinned\": true\n}",
+    "drafts/draft-old-untitled.json": "{\n  \"id\": \"draft-old-untitled\",\n  \"title\": \"\",\n  \"content\": \"a note with no name\",\n  \"file_path\": null,\n  \"created_at\": 1735689600000,\n  \"updated_at\": 1735689600000,\n  \"pinned\": false\n}",
+    "drafts/draft-old-titled-empty.json": "{\n  \"id\": \"draft-old-titled-empty\",\n  \"title\": \"Named but empty\",\n  \"content\": \"\",\n  \"file_path\": null,\n  \"created_at\": 1735689600000,\n  \"updated_at\": 1735689600000,\n  \"pinned\": false\n}",
+    "drafts/draft-old-file.json": "{\n  \"id\": \"draft-old-file\",\n  \"title\": \"\",\n  \"content\": \"stale copy in the store\",\n  \"file_path\": \"$DATA/kept.txt\",\n  \"created_at\": 1735689600000,\n  \"updated_at\": 1735689600000,\n  \"pinned\": false\n}",
+    "drafts/draft-old-missing.json": "{\n  \"id\": \"draft-old-missing\",\n  \"title\": \"On a drive that is not here\",\n  \"content\": \"\",\n  \"file_path\": \"$DATA/not-mounted/gone.txt\",\n  \"created_at\": 1735689600000,\n  \"updated_at\": 1735689600000,\n  \"pinned\": false\n}",
+    "drafts/draft-old-orphan.json": "{\n  \"id\": \"draft-old-orphan\",\n  \"title\": \"\",\n  \"content\": \"   \",\n  \"file_path\": null,\n  \"created_at\": 1735689600000,\n  \"updated_at\": 1735689600000,\n  \"pinned\": false\n}"
+  }
+}
