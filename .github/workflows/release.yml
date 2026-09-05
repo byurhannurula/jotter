@@ -59,18 +59,29 @@ jobs:
           pnpm test
           cargo test --manifest-path src-tauri/Cargo.toml
 
-      # Build release notes automatically: commits since the previous tag + install footer.
+      # Release notes: the hand-written CHANGELOG.md section for this tag if there
+      # is one, otherwise the commit subjects since the previous tag. Either way
+      # the install footer is appended.
       - name: Assemble release notes
         id: notes
         shell: bash
         run: |
-          prev="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
-          if [ -n "$prev" ]; then range="$prev..${GITHUB_REF_NAME}"; else range=""; fi
+          tag="${GITHUB_REF_NAME}"
           {
-            echo "### What's changed"
-            echo
-            git log --no-merges --pretty=format:'- %s (%h)' $range
-            echo
+            if [ -f CHANGELOG.md ] && grep -q "^## ${tag}$" CHANGELOG.md; then
+              awk -v want="## ${tag}" '
+                $0 == want { on = 1; next }
+                on && /^## / { exit }
+                on { print }
+              ' CHANGELOG.md
+            else
+              prev="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+              if [ -n "$prev" ]; then range="$prev..${tag}"; else range=""; fi
+              echo "### What's changed"
+              echo
+              git log --no-merges --pretty=format:'- %s (%h)' $range
+              echo
+            fi
             echo
             echo '---'
             echo 'These builds are **not code-signed / notarized** (no paid developer accounts):'
