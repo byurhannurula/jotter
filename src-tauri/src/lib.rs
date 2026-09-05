@@ -2315,6 +2315,11 @@ mod tests {
         let real = dir.path().join("real");
         fs::create_dir(&real).unwrap();
         let root = fs::canonicalize(dir.path()).unwrap();
+        // On Windows `fs::canonicalize` returns the `\\?\` verbatim form, which
+        // `canonical` strips. The expected path comes from the same call, so it
+        // has to be spelled the same way or this only ever passed on Unix. What
+        // is under test is still the `..` and the kept file name.
+        let expect = |p: PathBuf| strip_verbatim(path_str(&p));
 
         // `..` in the middle, file does not exist: directory resolved, name kept.
         let dotted = dir
@@ -2325,14 +2330,14 @@ mod tests {
             .join("new.txt");
         assert_eq!(
             canonical(dotted.to_str().unwrap()),
-            root.join("real").join("new.txt").to_string_lossy()
+            expect(root.join("real").join("new.txt"))
         );
 
         // Existing file: fully resolved.
         fs::write(real.join("a.txt"), "x").unwrap();
         assert_eq!(
             canonical(dotted.with_file_name("a.txt").to_str().unwrap()),
-            root.join("real").join("a.txt").to_string_lossy()
+            expect(root.join("real").join("a.txt"))
         );
 
         // Nothing resolvable at all: unchanged.
