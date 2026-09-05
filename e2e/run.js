@@ -6,7 +6,8 @@
 // A folder may carry a `launch.json`:
 //   { "files": { "note.txt": "text" }, "args": ["$DATA/note.txt"] }
 // `files` are written into the data folder before the launch; `$DATA` in an
-// arg is that folder.
+// arg is that folder. `"quits": true` says the folder's spec ends the app on
+// purpose, so its non-zero status is not a failure.
 //
 //   pnpm e2e              every launch, in order
 //   pnpm e2e launch-2     one folder (its earlier launches are assumed done)
@@ -52,6 +53,12 @@ for (const group of groups) {
       env: { ...process.env, JOTTER_DATA_DIR: dataDir, JOTTER_E2E_ARGS: JSON.stringify(args) },
     },
   );
-  if (status !== 0) failed += 1;
+  // A launch whose spec quits the app cannot report cleanly: the session dies
+  // with the process it was driving. Such a folder holds nothing but the quit,
+  // and what the quit had to write is asserted by the launch after it.
+  if (status !== 0) {
+    if (meta.quits) console.log(`(${group} quit the app, as it is meant to)`);
+    else failed += 1;
+  }
 }
 process.exit(failed ? 1 : 0);

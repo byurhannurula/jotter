@@ -3154,8 +3154,14 @@ async function init() {
     stored.add(d.id);
   }
 
-  // Only the E2E build answers true; the hook lets a spec drive menu items.
-  if (await invoke("is_e2e").catch(() => false)) window.__jotter = { menu: onMenu };
+  // Only the E2E build answers true. The hook lets a spec drive menu items, and
+  // draw the frame the UI is waiting on: WKWebView stops servicing
+  // requestAnimationFrame while the window is behind another one, so a suite
+  // running beside someone's work would otherwise read a sidebar and tab bar
+  // that never caught up with what was typed.
+  if (await invoke("is_e2e").catch(() => false)) {
+    window.__jotter = { menu: onMenu, flushUi };
+  }
 
   // Every launch starts on a fresh, clean page. Past notes live in the sidebar.
   startBlankSession();

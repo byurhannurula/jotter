@@ -35,6 +35,13 @@ export const config = {
   framework: "mocha",
   mochaOpts: { ui: "bdd", timeout: 60_000 },
 
+  // Nothing here raises the app window. WKWebView stops servicing
+  // requestAnimationFrame while the window is behind another one, and the app
+  // draws tab titles and sidebar rows from one — but stealing the front every
+  // few seconds makes the machine unusable while the suite runs. The specs
+  // call `settle()` instead, which draws that frame on demand through the E2E
+  // build's hook, so a run can share a desktop with whoever started it.
+
   /** On a failure, keep a screenshot and print what the page looked like. */
   async afterTest(test, _context, { passed }) {
     if (passed) return;
