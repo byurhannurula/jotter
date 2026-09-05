@@ -5,13 +5,18 @@ changelog page reads. That page keeps the bullets and drops the headings, and it
 reads line by line — so every bullet stays on one line, however long, and makes
 sense without its heading. Only the opening paragraph is prose.
 
-## v0.5.1
+## v0.5.2
 
 The release that makes Jotter safe to keep your notes in: writes that cannot be
 half-finished, a quit that waits for your last keystroke, and a sync that no
 longer deletes what it should leave alone. The editor caught up too — files from
 the Finder, focus mode, a sidebar you can move, and a keyboard that reaches
-everything.
+everything. And it has a new icon.
+
+### A new icon
+
+- **Jotter has one mark now, not two.** The app shipped a blue gradient tile with a document card on it; the website showed a flat paper square. They shared no shape, no palette and no idea, so downloading from the site got you something that looked like a different program.
+- **The mark is `txt` with a text cursor after it** — the file format this app is actually about, drawn in its own paper, ink and blue rather than a colour scheme borrowed from nowhere. It reduces to `t|` on smaller sizes and to the cursor alone in a browser tab, so the same mark holds from 1024 pixels down to 16.
 
 ### Your notes are harder to lose
 
