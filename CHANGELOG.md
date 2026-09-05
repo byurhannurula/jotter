@@ -5,7 +5,7 @@ changelog page reads. That page keeps the bullets and drops the headings, and it
 reads line by line — so every bullet stays on one line, however long, and makes
 sense without its heading. Only the opening paragraph is prose.
 
-## v0.5.0
+## v0.5.1
 
 The release that makes Jotter safe to keep your notes in: writes that cannot be
 half-finished, a quit that waits for your last keystroke, and a sync that no
