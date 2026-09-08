@@ -633,6 +633,227 @@ describe("a file changed outside the app", () => {
   });
 });
 
+describe("Save As", () => {
+  it("writes the file even when the autosave already ran", async () => {
+    app = await boot(seed());
+    await app.clickDraft("draft-a");
+    await app.type("alpha text, edited");
+    await app.autosave(); // nothing is unsaved any more
+    app.host.dialog.next = "/notes/alpha.txt";
+    await app.menu("save_as");
+    expect(app.host.disk.get("/notes/alpha.txt")).toBe("alpha text, edited");
+    expect(app.host.store.get("draft-a").file_path).toBe("/notes/alpha.txt");
+  });
+
+  it("writes over a name the user picked that is already on disk", async () => {
+    app = await boot({
+      drafts: [
+        {
+          id: "draft-f",
+          title: "",
+          content: "mine",
+          file_path: "/notes/f.txt",
+          created_at: 1,
+          updated_at: 1,
+          pinned: false,
+          cloud: false,
+        },
+      ],
+      files: { "/notes/f.txt": "mine", "/notes/other.txt": "theirs" },
+    });
+    await app.clickDraft("draft-f");
+    app.host.dialog.next = "/notes/other.txt";
+    await app.menu("save_as");
+    // The mtime the draft carried belongs to f.txt; against other.txt it would
+    // read as an outside write and the save would come back as a conflict.
+    expect(app.host.disk.get("/notes/other.txt")).toBe("mine");
+    expect(document.querySelector("#toast-host .toast:not(.out)")).toBe(null);
+  });
+
+  it("leaves the draft alone when the dialog is cancelled", async () => {
+    app = await boot(seed());
+    await app.clickDraft("draft-a");
+    app.host.dialog.next = null;
+    await app.menu("save_as");
+    expect(app.host.store.get("draft-a").file_path).toBe(null);
+  });
+
+  it("leaves one note on a file when the chosen name is a note already open", async () => {
+    app = await boot({
+      drafts: [
+        {
+          id: "draft-a",
+          title: "",
+          content: "mine",
+          file_path: null,
+          created_at: 1,
+          updated_at: 2,
+          pinned: false,
+          cloud: false,
+        },
+        {
+          id: "draft-f",
+          title: "",
+          content: "theirs",
+          file_path: "/notes/f.txt",
+          created_at: 1,
+          updated_at: 1,
+          pinned: false,
+          cloud: false,
+        },
+      ],
+      files: { "/notes/f.txt": "theirs" },
+    });
+    await app.clickDraft("draft-a");
+    app.host.dialog.next = "/notes/f.txt";
+    await app.menu("save_as");
+    expect(app.host.disk.get("/notes/f.txt")).toBe("mine");
+    // Two drafts on one file each re-read the other's text and each write over it.
+    expect([...app.host.store.values()].filter((d) => d.file_path === "/notes/f.txt")).toHaveLength(
+      1,
+    );
+    expect(app.sidebarIds()).toEqual(["draft-a"]);
+  });
+});
+
+describe("a save that cannot reach disk", () => {
+  const toasts = () =>
+    [...document.querySelectorAll("#toast-host .toast:not(.out) .toast-msg")].map(
+      (n) => n.textContent,
+    );
+
+  /** A draft of its own per test. A stray autosave timer from an earlier boot
+   *  reaches whatever host is mocked now, and under a broken save_draft it
+   *  would put its own prompt in the toast host this test is reading. */
+  const only = (id, content = "a note") => ({
+    drafts: [
+      {
+        id,
+        title: "",
+        content,
+        file_path: null,
+        created_at: 1,
+        updated_at: 2,
+        pinned: false,
+        cloud: false,
+      },
+    ],
+  });
+
+  /** Make every save_draft fail the way an unwritable folder does. */
+  const breakSaving = (a) => {
+    a.host.handlers.save_draft = () => {
+      throw new Error("Read-only file system (os error 30)");
+    };
+  };
+
+  it("says so instead of leaving the note looking saved", async () => {
+    app = await boot(only("fail-1"));
+    await app.clickDraft("fail-1");
+    breakSaving(app);
+    await app.type("a note, edited");
+    await app.autosave();
+    // Named the way the sidebar names it: a note's first line is its title.
+    expect(toasts()).toEqual(['Couldn\'t save "a note, edited" — nothing was written to disk']);
+    // The colour is what makes it hard to walk past, and role="alert" is the
+    // same interruption for a screen reader: the host is only aria-live=polite.
+    const toast = document.querySelector("#toast-host .toast:not(.out)");
+    expect(toast.classList.contains("is-danger")).toBe(true);
+    expect(toast.getAttribute("role")).toBe("alert");
+  });
+
+  it("says it once, not once per autosave", async () => {
+    app = await boot(only("fail-2"));
+    await app.clickDraft("fail-2");
+    breakSaving(app);
+    for (const t of ["one", "one two", "one two three"]) {
+      await app.type(t);
+      await app.autosave();
+    }
+    expect(toasts()).toHaveLength(1);
+  });
+
+  it("takes the message down once a save gets through", async () => {
+    app = await boot(only("fail-3"));
+    await app.clickDraft("fail-3");
+    const real = app.host.handlers.save_draft;
+    breakSaving(app);
+    await app.type("a note, edited");
+    await app.autosave();
+    expect(toasts()).toHaveLength(1);
+
+    app.host.handlers.save_draft = real;
+    await app.type("a note, edited twice");
+    await app.autosave();
+    expect(toasts()).toEqual([]);
+    expect(app.host.store.get("fail-3").content).toBe("a note, edited twice");
+  });
+
+  it("says so when Save As is the thing that failed", async () => {
+    app = await boot(only("fail-4"));
+    await app.clickDraft("fail-4");
+    breakSaving(app);
+    app.host.dialog.next = "/notes/f4.txt";
+    await app.menu("save_as");
+    // The path is on screen; without the message that is all the user gets.
+    expect(toasts()).toEqual(['Couldn\'t save "f4.txt" — nothing was written to disk']);
+    expect(app.host.disk.has("/notes/f4.txt")).toBe(false);
+  });
+
+  it("offers Retry, which writes the note once the folder is writable again", async () => {
+    app = await boot(only("fail-5"));
+    await app.clickDraft("fail-5");
+    const real = app.host.handlers.save_draft;
+    breakSaving(app);
+    await app.type("a note, edited");
+    await app.autosave();
+
+    app.host.handlers.save_draft = real;
+    expect(await app.clickToast("Retry")).toBe(true);
+    expect(app.host.store.get("fail-5").content).toBe("a note, edited");
+    expect(toasts()).toEqual([]);
+  });
+
+  it("goes when the draft it is about is deleted", async () => {
+    app = await boot(only("fail-6"));
+    await app.clickDraft("fail-6");
+    breakSaving(app);
+    await app.type("a note, edited");
+    await app.autosave();
+    expect(toasts()).toHaveLength(1);
+
+    await app.contextMenu("fail-6", "Delete");
+    // Only the delete's own undo toast is left. Retry on the other one would
+    // write the draft back into the store the delete just took it out of.
+    expect(toasts()).toEqual(['Deleted "a note, edited"']);
+  });
+});
+
+describe("exporting", () => {
+  it("writes the text in the editor, not the last text saved", async () => {
+    app = await boot(seed());
+    await app.clickDraft("draft-a");
+    await app.type("alpha text, edited");
+    app.host.dialog.next = "/notes/alpha.md";
+    await app.contextMenu("draft-a", "Export…");
+    expect(app.host.disk.get("/notes/alpha.md")).toBe("alpha text, edited");
+    expect(app.host.store.get("draft-a").file_path).toBe(null); // export is not Save As
+    const toast = document.querySelector("#toast-host .toast:not(.out)");
+    expect(toast.className).toBe("toast is-success");
+    expect(toast.getAttribute("role")).toBe(null); // nothing went wrong; do not interrupt
+  });
+
+  it("wraps an .html target in a document and leaves the draft's text alone", async () => {
+    app = await boot(seed());
+    app.host.dialog.next = "/notes/alpha.html";
+    await app.contextMenu("draft-a", "Export…");
+    const out = app.host.disk.get("/notes/alpha.html");
+    expect(out).toContain("<!doctype html>");
+    expect(out).toContain("alpha text");
+    expect(app.host.store.get("draft-a").content).toBe("alpha text");
+  });
+});
+
 describe("a mixed session", () => {
   it("always shows the active draft's text and never loses an edit", async () => {
     app = await boot(seed());

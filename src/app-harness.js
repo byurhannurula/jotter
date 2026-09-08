@@ -81,6 +81,11 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
       if (!disk.has(path)) throw new Error(`no such file: ${path}`);
       return [disk.get(path), mtimes.get(path) ?? null];
     },
+    // Export. Writes to the fake disk without touching the draft's own path.
+    write_text_file: ({ path, contents }) => {
+      disk.set(path, contents);
+      mtimes.set(path, (mtimes.get(path) ?? 1000) + 1);
+    },
     write_conflict_copy: ({ path, contents }) => {
       const copy = path.replace(/(\.[^./]+)?$/, " (conflicted copy)$1");
       disk.set(copy, contents);
@@ -107,14 +112,39 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
     refresh_shares: () => ({}),
     sync_now: () => undefined,
     get_drafts_dir: () => ["/Users/test/Library/Application Support/jotter/drafts", true, true],
+    set_drafts_dir: () => undefined,
+    open_drafts_dir: () => undefined,
+    set_cloud: ({ id, on }) => {
+      const entry = store.get(id);
+      if (entry) store.set(id, { ...entry, cloud: on });
+    },
+    create_share: ({ id }) => ({ shareId: `share-${id}`, url: `https://example.test/s/${id}` }),
+    revoke_share: () => undefined,
+    get_sync_token: () => "",
+    set_sync_config: () => undefined,
+    sync_test_connection: () => ({ ok: true }),
     "plugin:path|resolve_directory": () => "/Users/test/",
-    "plugin:updater|check": () => ({ available: false }),
+    // The plugin's own wrapper is `metadata ? new Update(metadata) : null`, so
+    // "no update" is null on the wire. A falsy-looking object is still truthy
+    // there, and every test that ran long enough grew an "Update undefined
+    // available" toast on top of the one it was asserting about.
+    "plugin:updater|check": () => null,
   };
 
   mockWindows("main");
-  mockIPC((cmd, args) => (cmd in handlers ? handlers[cmd](args ?? {}) : undefined), {
-    shouldMockEvents: true,
-  });
+  // An unlisted command throws rather than answering `undefined`. Returning
+  // undefined let a test drive a whole feature that never reached the fake host
+  // and still pass: Export invoked `write_text_file`, nothing implemented it,
+  // the call "succeeded", and an assertion on what it wrote could only have
+  // been written against nothing. A new Rust command now fails its first test
+  // run here instead of going untested.
+  mockIPC(
+    (cmd, args) => {
+      if (!(cmd in handlers)) throw new Error(`the harness has no handler for "${cmd}"`);
+      return handlers[cmd](args ?? {});
+    },
+    { shouldMockEvents: true },
+  );
 
   /** Simulate another program writing the file: new text, new mtime. */
   const editOutside = (path, text) => {

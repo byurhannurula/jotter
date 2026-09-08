@@ -23,6 +23,11 @@
   --settings-card: #ffffff;
   --settings-rail: #e9e9ec;
   --settings-border: rgba(0, 0, 0, 0.1);
+  /* Status hues, as RGB triplets so one value serves a solid stripe, a
+     hairline and a wash at three different alphas. */
+  --danger-rgb: 209 68 60;
+  --warn-rgb: 178 106 0;
+  --success-rgb: 36 138 61;
   --sidebar-w: 250px;
   --sidebar-min: 190px;
   --sidebar-max: 420px;
@@ -55,6 +60,9 @@
     --settings-card: #2c2c30;
     --settings-rail: #1c1c1e;
     --settings-border: rgba(255, 255, 255, 0.09);
+    --danger-rgb: 255 105 97;
+    --warn-rgb: 255 159 10;
+    --success-rgb: 48 209 88;
   }
 }
 
@@ -76,6 +84,9 @@ html[data-theme="light"] {
   --settings-card: #ffffff;
   --settings-rail: #e9e9ec;
   --settings-border: rgba(0, 0, 0, 0.1);
+  --danger-rgb: 209 68 60;
+  --warn-rgb: 178 106 0;
+  --success-rgb: 36 138 61;
 }
 
 html[data-theme="dark"] {
@@ -95,6 +106,9 @@ html[data-theme="dark"] {
   --settings-card: #2c2c30;
   --settings-rail: #1c1c1e;
   --settings-border: rgba(255, 255, 255, 0.09);
+  --danger-rgb: 255 105 97;
+  --warn-rgb: 255 159 10;
+  --success-rgb: 48 209 88;
 }
 
 * {
@@ -1371,19 +1385,7 @@ body.sidebar-hidden.fullscreen .tabbar {
 /* A configured folder that can't be reached right now. */
 .settings-note.is-warning,
 .path-value.is-warning {
-  color: #d1443c;
-}
-
-html[data-theme="dark"] .settings-note.is-warning,
-html[data-theme="dark"] .path-value.is-warning {
-  color: #ff6961;
-}
-
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme="light"]) .settings-note.is-warning,
-  html:not([data-theme="light"]) .path-value.is-warning {
-    color: #ff6961;
-  }
+  color: rgb(var(--danger-rgb));
 }
 
 /* A circled "i" beside a setting's label; the text itself lives in .tip. */
@@ -1678,6 +1680,31 @@ body.tab-moves-focus .setting-row[data-setting="tabsize"] {
   padding: 9px 10px 9px 14px;
   font-size: 13px;
   animation: toast-in 0.18s var(--ease);
+}
+
+/* A toast that reports a state carries its hue three ways: a stripe down the
+   leading edge, a matching hairline, and a wash over the card. Layered as a
+   background-image so the card's own translucency is kept underneath.
+   The message text stays --text — colour marks the toast, it does not have to
+   carry the words, and a red sentence on a red wash reads worse. */
+.toast.is-danger {
+  --toast-rgb: var(--danger-rgb);
+}
+.toast.is-warn {
+  --toast-rgb: var(--warn-rgb);
+}
+.toast.is-success {
+  --toast-rgb: var(--success-rgb);
+}
+.toast.is-danger,
+.toast.is-warn,
+.toast.is-success {
+  padding-left: 16px;
+  border-color: rgb(var(--toast-rgb) / 0.55);
+  background-image: linear-gradient(rgb(var(--toast-rgb) / 0.15), rgb(var(--toast-rgb) / 0.15));
+  box-shadow:
+    inset 3px 0 0 rgb(var(--toast-rgb)),
+    0 10px 30px rgba(0, 0, 0, 0.28);
 }
 .toast.out {
   animation: toast-out 0.18s ease forwards;

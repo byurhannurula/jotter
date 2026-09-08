@@ -180,7 +180,7 @@ const syncNow = () => invoke("sync_now").catch(ignore("retried by the next tick"
 /** Log the cause, tell the user in plain words. */
 function fail(message, err, tag = message) {
   console.error(`${tag}:`, err);
-  showToast(message);
+  showToast(message, { kind: "danger" });
 }
 
 function scheduleSync() {
@@ -571,6 +571,7 @@ async function writeDraft(d, { sync = true } = {}) {
     // whether anything else has written to it.
     d.file_mtime = await invoke("save_draft", { draft: d });
     stored.add(d.id);
+    clearSaveFailure(d.id);
     if (sync) scheduleSync();
     return true;
   } catch (err) {
@@ -580,12 +581,68 @@ async function writeDraft(d, { sync = true } = {}) {
       return false;
     }
     console.error("save_draft failed:", err);
+    onSaveFailed(d);
     return false;
   }
 }
 
 /** Draft id -> the open conflict toast's dismiss function. */
 const conflicted = new Map();
+
+/** Draft id -> the open "couldn't save" toast's dismiss function. */
+const saveFailed = new Map();
+
+/** Take down a save-failure prompt once that draft has reached disk. */
+function clearSaveFailure(id) {
+  const dismiss = saveFailed.get(id);
+  if (!dismiss) return;
+  saveFailed.delete(id);
+  dismiss();
+}
+
+/** A save was refused for a reason that is not a conflict: an unwritable
+ *  folder, a file the OS has locked, a full disk, a path the host will not
+ *  take.
+ *
+ *  Saying nothing was the worse failure. The sidebar, the title bar and the
+ *  file's own row go on showing a path with nothing behind it, which reads
+ *  exactly like a note that saved — the user finds out when the file is not in
+ *  the folder, or when Reveal in Finder cannot find it.
+ *
+ *  Autosave retries on the next keystroke, so this must not speak once per
+ *  attempt: one prompt per draft stands until a save gets through. Save As is
+ *  the way out of every cause, since it writes where the user picks, but it
+ *  acts on the draft the editor is showing — so it is only offered for that
+ *  one, and a background draft is left with Retry.
+ */
+function onSaveFailed(d) {
+  if (saveFailed.has(d.id)) return;
+  saveFailed.set(d.id, () => {}); // claim the slot before showToast returns
+  const name = d.file_path ? baseName(d.file_path) : draftTitle(d);
+  const retry = {
+    actionLabel: "Retry",
+    onAction: () => {
+      saveFailed.delete(d.id);
+      saveDraft(d);
+    },
+  };
+  const dismiss = showToast(`Couldn't save "${name}" — nothing was written to disk`, {
+    timeout: 0,
+    kind: "danger",
+    ...(d.id === currentId
+      ? {
+          actionLabel: "Save As…",
+          onAction: () => {
+            saveFailed.delete(d.id);
+            saveAs();
+          },
+          secondaryLabel: retry.actionLabel,
+          onSecondary: retry.onAction,
+        }
+      : retry),
+  });
+  if (saveFailed.has(d.id)) saveFailed.set(d.id, dismiss);
+}
 
 /** Take down a conflict prompt that no longer applies.
  *
@@ -623,6 +680,7 @@ async function onFileConflict(d) {
       : `"${name}" changed on disk since you opened it`,
     {
       timeout: 0,
+      kind: "warn",
       actionLabel: "Reload",
       onAction: async () => {
         conflicted.delete(d.id);
@@ -637,7 +695,7 @@ async function onFileConflict(d) {
           }
           renderAll();
         } catch {
-          showToast("Couldn't read the file back");
+          showToast("Couldn't read the file back", { kind: "danger" });
         }
       },
       secondaryLabel: "Keep mine",
@@ -787,7 +845,7 @@ async function activate(id, { focusEditor = true } = {}) {
       unsaved.delete(id); // what is in memory is what is on disk
       clearConflict(id); // the disk copy is what is on screen now
     } catch {
-      showToast(`"${draftTitle(d)}" is no longer on disk`);
+      showToast(`"${draftTitle(d)}" is no longer on disk`, { kind: "warn" });
       await removeDraftFromView(id);
       return;
     }
@@ -939,6 +997,9 @@ function reopenClosedTab() {
 async function removeDraftFromView(id) {
   const wasOpen = openTabs.includes(id);
   previewTabs.delete(id);
+  // A draft that is leaving has nowhere to save to, and its prompt's Retry
+  // would write it back into the store the delete just took it out of.
+  clearSaveFailure(id);
   const result = tabModel.removeDraftFromView(tabState(), tabDeps, id);
   commitTabs(result);
   // activate() re-reads a file-backed neighbour and loads the editor; when the
@@ -1215,8 +1276,32 @@ async function saveAs() {
   // Same spelling as an open of this file will produce later, or it would
   // come back as a second tab. The Rust side resolves the folder and keeps
   // the name when the file does not exist yet.
-  d.file_path = await invoke("canonical_path", { path }).catch(() => path);
+  const target = await invoke("canonical_path", { path }).catch(() => path);
+  // The chosen name can be one the app is already showing as another note. The
+  // OS dialog has taken the user's answer about replacing the file, so the text
+  // that draft stood for is going either way; leaving it would put two rows on
+  // one file, each re-reading the other's text and each writing over it. The
+  // file holds one note now, and this is it. Its own store entry goes; the file
+  // does not, since it is the one being saved to.
+  const other = [...drafts.values()].find((o) => o.id !== d.id && o.file_path === target);
+  if (other) {
+    await removeDraftFromView(other.id);
+    await forgetStored(other.id);
+  }
+  d.file_path = target;
   d.updated_at = Date.now();
+  // The draft is now backed by a file it has never been written to, so it has
+  // to be written whatever its edit state: `persist` skips a draft with nothing
+  // unsaved, which after an autosave is every draft the user did not just type
+  // into, and the file would never appear.
+  unsaved.add(d.id);
+  // The mtime belongs to whatever file the draft was backed by before. Against
+  // a chosen name that already exists it reads as another program's write, and
+  // the save comes back as a conflict; dropping it is how a caller says "write
+  // regardless", which is what picking a name in a save dialog means. The old
+  // file's conflict toast, if one is up, is about a file this draft has left.
+  d.file_mtime = null;
+  clearConflict(d.id);
   renderAll();
   await flush();
 }
@@ -1751,9 +1836,9 @@ async function moveDraftsDir(dir) {
       await activate(openTabs[0]);
     }
     renderAll();
-    showToast("Drafts folder changed");
+    showToast("Drafts folder changed", { kind: "success" });
   } catch (e) {
-    showToast(`Could not move the drafts folder: ${e}`);
+    showToast(`Could not move the drafts folder: ${e}`, { kind: "danger" });
   }
 }
 
@@ -1857,7 +1942,7 @@ async function checkForUpdates({ silent = false } = {}) {
     }
   } catch (err) {
     console.error("update check failed:", err);
-    if (!silent) showToast("Couldn't check for updates");
+    if (!silent) showToast("Couldn't check for updates", { kind: "danger" });
   } finally {
     updateChecking = false;
   }
@@ -2237,7 +2322,7 @@ function renderSyncSection() {
       await save();
     } catch (err) {
       setPill("Not saved", "err");
-      showToast(String(err), { timeout: 9000 });
+      showToast(String(err), { timeout: 9000, kind: "danger" });
       updateEnabled();
       return;
     }
@@ -2364,12 +2449,23 @@ function initSettings() {
  *  `timeout: 0` keeps it up until the user answers — for a question where
  *  letting it time out would pick an answer on their behalf.
  */
+/** `kind` is "danger", "warn", "success", or left out for a plain remark.
+ *
+ *  Every toast used to be the same white card, so a save that failed looked
+ *  like a note that saved and was missed. The host is aria-live="polite", which
+ *  is right for a remark and too quiet for a failure — a danger toast is a
+ *  role="alert", so a screen reader is interrupted the way the colour
+ *  interrupts the eye. */
 function showToast(
   message,
-  { actionLabel, onAction, secondaryLabel, onSecondary, timeout = 5000 } = {},
+  { actionLabel, onAction, secondaryLabel, onSecondary, timeout = 5000, kind } = {},
 ) {
   const host = document.getElementById("toast-host");
-  const toast = el("div", { class: "toast" }, el("span", { class: "toast-msg", text: message }));
+  const toast = el(
+    "div",
+    { class: kind ? `toast is-${kind}` : "toast", role: kind === "danger" ? "alert" : null },
+    el("span", { class: "toast-msg", text: message }),
+  );
   let timer;
   const dismiss = () => {
     clearTimeout(timer);
@@ -2646,7 +2742,7 @@ async function exportDraft(id) {
   const contents = /\.html?$/i.test(path) ? exportHtml(draftTitle(d), content) : content;
   try {
     await invoke("write_text_file", { path, contents });
-    showToast("Exported");
+    showToast("Exported", { kind: "success" });
   } catch (err) {
     fail("Export failed", err, "export failed");
   }
@@ -2731,7 +2827,9 @@ async function setFileCloud(id, on) {
   } catch (err) {
     console.error("set_cloud failed:", err);
     d.cloud = !on; // roll back so the menu offers the same choice again
-    showToast(on ? "Couldn't enable sync for this file" : "Couldn't stop syncing this file");
+    showToast(on ? "Couldn't enable sync for this file" : "Couldn't stop syncing this file", {
+      kind: "danger",
+    });
   }
 }
 
