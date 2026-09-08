@@ -5,6 +5,22 @@ changelog page reads. That page keeps the bullets and drops the headings, and it
 reads line by line — so every bullet stays on one line, however long, and makes
 sense without its heading. Only the opening paragraph is prose.
 
+## v0.5.4
+
+A settings switch that showed the wrong state, and could turn a setting off when
+you clicked it to turn it on. If your update checks stopped without you meaning
+to, this is why.
+
+### Settings
+
+- **"Automatically check for updates" now shows what it is actually set to.** The switch came up off however it was stored, and because clicking it read the stored value rather than the one on screen, a click meant to enable it turned it off instead. If your update checks stopped on their own, open Settings → About and set it once more.
+- **Every switch and segmented control now paints itself from what is stored**, so no setting can come up showing a state it is not in.
+- **A switch also tells a screen reader whether it is on** before it has been touched.
+
+### Telling one build from another
+
+- **A build that is not the released app now says so** — a DEV badge in the status bar, "— DEV" in the window title, and "(dev build)" beside the version in About. Development builds share a drafts folder with the installed app, so knowing which one is on screen is worth a glance.
+
 ## v0.5.3
 
 A fix for Save As, which could show you a path and write nothing at all, and a
