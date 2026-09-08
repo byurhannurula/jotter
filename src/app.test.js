@@ -1047,3 +1047,22 @@ describe("a setting the app is launched with", () => {
     expect(active.dataset.val).toBe("confirm");
   });
 });
+
+describe("telling a dev build apart from the installed app", () => {
+  const badge = () => document.getElementById("status-build");
+
+  it("marks the window when the host says this is not a release build", async () => {
+    app = await boot({ ...seed(), devBuild: true });
+    expect(badge().hidden).toBe(false);
+    expect(document.body.classList.contains("dev-build")).toBe(true);
+    // The Dock and the window switcher are where two Jotters look alike.
+    expect(document.title.endsWith(" — DEV")).toBe(true);
+  });
+
+  it("says nothing in the released app", async () => {
+    app = await boot(seed());
+    expect(badge().hidden).toBe(true);
+    expect(document.body.classList.contains("dev-build")).toBe(false);
+    expect(document.title).not.toContain("DEV");
+  });
+});

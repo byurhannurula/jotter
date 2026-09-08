@@ -31,7 +31,7 @@ export async function settle() {
 
 /** In-memory stand-in for the Rust drafts store plus the few plugin commands
  *  init() touches. Records every save so a test can assert what hit disk. */
-export function fakeHost({ drafts = [], files = {} } = {}) {
+export function fakeHost({ drafts = [], files = {}, devBuild = false } = {}) {
   const store = new Map(drafts.map((d) => [d.id, { ...d }]));
   const disk = new Map(Object.entries(files));
   const mtimes = new Map([...disk.keys()].map((p) => [p, 1000]));
@@ -106,6 +106,8 @@ export function fakeHost({ drafts = [], files = {} } = {}) {
     pick_folder: () => dialog.next,
     canonical_path: ({ path }) => path,
     take_opened_files: () => [],
+    is_e2e: () => false,
+    is_dev_build: () => devBuild,
     confirm_quit: () => undefined,
     get_sync_config: () => ({ enabled: false, url: "", has_token: false }),
     synced_ids: () => [],

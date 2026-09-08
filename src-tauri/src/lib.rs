@@ -394,6 +394,18 @@ fn is_e2e() -> bool {
     cfg!(feature = "e2e")
 }
 
+/// True for anything that is not a release build: `tauri dev` and a local
+/// `tauri build --debug` both answer yes, the shipped binary answers no.
+///
+/// A dev build and the installed app share `com.byrhn.jotter`, so they share
+/// one drafts folder and cannot be told apart by their window. The page marks
+/// itself when this is true, so it is clear which one is on screen before
+/// anything is typed into it.
+#[tauri::command]
+fn is_dev_build() -> bool {
+    cfg!(debug_assertions)
+}
+
 #[tauri::command]
 fn init_store(app: AppHandle) -> Result<Vec<Draft>, String> {
     let mut drafts = read_all_drafts(&app)?;
@@ -1983,6 +1995,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             init_store,
             is_e2e,
+            is_dev_build,
             save_entry,
             save_draft,
             delete_draft,

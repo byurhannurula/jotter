@@ -1654,6 +1654,21 @@ body.tab-moves-focus .setting-row[data-setting="tabsize"] {
   border-radius: 6px;
 }
 
+/* A build that is not the released app. Marked in amber rather than red: it is
+   not a fault, it is a fact about which binary is on screen — and a dev build
+   writes to the same drafts folder as the installed one. */
+.status-build {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: rgb(var(--warn-rgb));
+  background: rgb(var(--warn-rgb) / 0.14);
+  border: 1px solid rgb(var(--warn-rgb) / 0.4);
+}
+
 /* ---- Toast ---- */
 
 .toast-host {

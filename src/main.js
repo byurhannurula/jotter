@@ -416,9 +416,15 @@ function syncSpellcheck() {
   if (editor.spellcheck !== on) editor.spellcheck = on;
 }
 
+/** Whether this binary is a dev or local --debug build. Set once, at init. */
+let isDevBuild = false;
+
 function updateWindowTitle() {
   const d = drafts.get(currentId);
-  const name = d ? draftTitle(d) : "Untitled";
+  const base = d ? draftTitle(d) : "Untitled";
+  // In the window title too: the Dock and the window switcher are where two
+  // Jotters are hardest to tell apart.
+  const name = isDevBuild ? `${base} — DEV` : base;
   document.title = name;
   if (name !== lastWinTitle) {
     lastWinTitle = name;
@@ -1989,7 +1995,7 @@ function renderAboutSection() {
     </button>
     <div class="about-hero-text">
       <div class="about-hero-name">${APP.name}</div>
-      <div class="about-hero-ver">Version ${APP.version}</div>
+      <div class="about-hero-ver">Version ${APP.version}${isDevBuild ? " (dev build)" : ""}</div>
       <div class="about-hero-desc">${APP.tagline}</div>
     </div>`;
   host.append(hero);
@@ -3268,6 +3274,15 @@ async function init() {
   // that never caught up with what was typed.
   if (await invoke("is_e2e").catch(() => false)) {
     window.__jotter = { menu: onMenu, flushUi };
+  }
+
+  // A dev build and the installed app carry the same bundle id, so they share
+  // one drafts folder and look identical on screen. Say which one this is,
+  // before anything is typed into it.
+  isDevBuild = await invoke("is_dev_build").catch(() => false);
+  if (isDevBuild) {
+    document.getElementById("status-build").hidden = false;
+    document.body.classList.add("dev-build");
   }
 
   // Every launch starts on a fresh, clean page. Past notes live in the sidebar.
