@@ -1030,6 +1030,15 @@ body.sidebar-hidden.fullscreen .tabbar {
 
 .about-icon svg {
   display: block;
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+  /* The mark's tile is paper (#f7f7f5), which is all but invisible on the
+     white settings card; macOS gives an app icon its edge from the OS, so
+     here it is drawn in. */
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.09),
+    0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 @keyframes spin {
@@ -1148,6 +1157,36 @@ body.sidebar-hidden.fullscreen .tabbar {
 }
 .rail-item.active {
   background: var(--item-active);
+}
+
+/* Keyboard focus inside settings, on the same terms as the tabs and the sidebar
+   rows above: never a ring, always the emphasis the control already owns. Every
+   one of these fell through to the UA outline, which is what put a box around
+   General the moment settings opened — that row is the first focusable, so it
+   takes focus on open and is already marked by its active fill. */
+.rail-item:focus-visible,
+.seg button:focus-visible,
+.group-link:focus-visible,
+.modal-close:focus-visible,
+.switch:focus-visible,
+.about-icon:focus-visible {
+  outline: none;
+}
+.rail-item:focus-visible:not(.active),
+.modal-close:focus-visible {
+  background: var(--item-hover);
+}
+.seg button:focus-visible {
+  color: var(--text);
+}
+.group-link:focus-visible {
+  text-decoration: underline;
+}
+/* A switch is a filled pill, so a fill says nothing. It takes the accent as a
+   ring drawn inside its own edge — a shadow, not an outline, so it follows the
+   pill's radius instead of boxing it. */
+.switch:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-hi);
 }
 
 .settings-content {
