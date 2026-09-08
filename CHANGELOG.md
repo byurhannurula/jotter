@@ -5,6 +5,27 @@ changelog page reads. That page keeps the bullets and drops the headings, and it
 reads line by line — so every bullet stays on one line, however long, and makes
 sense without its heading. Only the opening paragraph is prose.
 
+## v0.5.3
+
+A fix for Save As, which could show you a path and write nothing at all, and a
+rule the app now keeps: if a save does not reach disk, it says so.
+
+### Save As
+
+- **Save As writes the file it names.** A note whose autosave had already run got a path in the sidebar and in the title bar with no file behind it, and the first sign was Reveal in Finder saying it could not find it. Saving in the moment before the autosave ran still worked, which is why the fault came and went.
+- **Saving onto a file that already exists no longer reports a conflict** that was invented from the previous file's timestamp.
+- **Saving onto a file another note already has open leaves one note on that file**, rather than two that each re-read the other's text and each write over it.
+
+### When a save cannot reach disk
+
+- **A save that fails now says so**, naming the note and offering a way out: Save As for the note in the editor, Retry for one in the background. An unwritable folder, a locked file or a full disk used to leave the path on screen, nothing on disk, and nothing said.
+- **The message stands until a save gets through**, and is not repeated for every autosave behind it.
+
+### Messages you can tell apart
+
+- **A message now carries the colour of what it reports** — red for a failure, amber for a decision waiting on you, green for something that worked. Every message used to be the same white card, so a failure looked exactly like a confirmation and was easy to walk past.
+- **A failure also interrupts a screen reader** instead of waiting its turn politely.
+
 ## v0.5.2
 
 The release that makes Jotter safe to keep your notes in: writes that cannot be
