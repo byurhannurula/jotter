@@ -1009,3 +1009,41 @@ describe("searching", () => {
     expect(app.sidebarIds()).toContain("draft-b");
   });
 });
+
+describe("a setting the app is launched with", () => {
+  const sw = () => document.getElementById("set-autoupdate");
+
+  it("shows as on when that is what was stored", async () => {
+    app = await boot({ ...seed(), settings: { autoupdate: "on" } });
+    expect(sw().classList.contains("on")).toBe(true);
+    expect(sw().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("shows as off when that is what was stored", async () => {
+    app = await boot({ ...seed(), settings: { autoupdate: "off" } });
+    expect(sw().classList.contains("on")).toBe(false);
+    expect(sw().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("shows its default when nothing was stored", async () => {
+    app = await boot(seed());
+    expect(sw().classList.contains("on")).toBe(true); // autoupdate defaults to on
+  });
+
+  it("turns off on the first click when it was launched on", async () => {
+    // The switch used to render off whatever was stored, so this click read a
+    // value the user could not see and did the opposite of what it showed.
+    app = await boot({ ...seed(), settings: { autoupdate: "on" } });
+    sw().click();
+    expect(sw().classList.contains("on")).toBe(false);
+    expect(localStorage.getItem("set-autoupdate")).toBe("off");
+  });
+
+  it("keeps a setting from the section that is built before it is appended", async () => {
+    // Every other control is painted by the same path; a segmented one too.
+    app = await boot({ ...seed(), settings: { del: "confirm" } });
+    const seg = document.getElementById("set-del");
+    const active = [...seg.querySelectorAll("button")].find((b) => b.classList.contains("active"));
+    expect(active.dataset.val).toBe("confirm");
+  });
+});

@@ -169,6 +169,13 @@ export async function boot(hostOptions) {
   document.body.innerHTML = bodyInner;
   document.body.className = "sidebar-hidden";
   localStorage.clear();
+  // `settings` seeds the store the way a previous run would have left it, so a
+  // test can ask what the app makes of a setting it is launched with. Without
+  // it every boot starts on the defaults and nothing about persistence is
+  // reachable from a test at all.
+  for (const [name, val] of Object.entries(hostOptions?.settings ?? {})) {
+    localStorage.setItem(`set-${name}`, val);
+  }
 
   // main.js registers init on DOMContentLoaded. Capture it instead of letting
   // it attach, so an earlier test's instance is never re-run on this DOM.

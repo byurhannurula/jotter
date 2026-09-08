@@ -1664,7 +1664,17 @@ function setSetting(name, val) {
 }
 function markControl(name, val) {
   const el = document.getElementById(`set-${name}`);
-  if (!el) return;
+  if (el) paintControl(el, name, val);
+}
+
+/** Paint a control's state onto the element itself, rather than looking it up.
+ *
+ *  A row builds its control before anything appends it, so the lookup finds
+ *  nothing and the row keeps the off-state it was built in. That is how the
+ *  About section's "Automatically check for updates" came up switched off
+ *  however it was stored — and worse, the first click then read the stored
+ *  value, so a toggle that showed off turned the setting off. */
+function paintControl(el, name, val) {
   if (SETTINGS[name].control === "toggle") {
     const on = String(val) === "on";
     el.classList.toggle("on", on);
@@ -1708,6 +1718,7 @@ function settingRow(name) {
             el("button", { data: { val }, text, on: { click: () => setSetting(name, val) } }),
           ),
         );
+  paintControl(control, name, getSetting(name));
   return el("div", { class: "setting-row", data: { setting: name } }, labelWrap, control);
 }
 
@@ -1988,7 +1999,6 @@ function renderAboutSection() {
   const updates = groupCard();
 
   const autoRow = settingRow("autoupdate");
-  markControl("autoupdate", getSetting("autoupdate"));
 
   const checkRow = groupRow();
   checkRow.append(
@@ -2430,7 +2440,6 @@ function initSettings() {
       sectionEl(sec).append(cards[sec]);
     }
     cards[sec].append(settingRow(name));
-    markControl(name, getSetting(name));
   }
   renderStorageSection();
   renderShortcutsSection();
