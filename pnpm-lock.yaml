@@ -46,8 +46,8 @@ importers:
         specifier: ^4.11.0
         version: 4.11.0
       happy-dom:
-        specifier: ^20.12.0
-        version: 20.12.0
+        specifier: ^20.14.6
+        version: 20.14.6
       husky:
         specifier: ^9.1.7
         version: 9.1.7
@@ -62,7 +62,7 @@ importers:
         version: 8.3.8(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.4.0)(happy-dom@20.12.0)(vite@8.3.8(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
+        version: 4.1.10(@types/node@26.4.0)(happy-dom@20.14.6)(vite@8.3.8(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
       webdriverio:
         specifier: 9.33.1
         version: 9.33.1
@@ -1427,8 +1427,8 @@ packages:
   grapheme-splitter@1.0.4:
     resolution: {integrity: sha512-bzh50DW9kTPM00T8y4o8vQg89Di9oLJVLW/KaOGIXJWP/iqCN6WKYkbNOF04vFLJhwcpYUh9ydh/+5vpOqV4YQ==}
 
-  happy-dom@20.12.0:
-    resolution: {integrity: sha512-7uMYJu2SEwwL8vVcKp0C0lnt6d2LSGGe+T+oY79PiCJNNSgFpbxW8n5KuzpDQvrU4mt+fYiK1+Jy7Z2v39YR6g==}
+  happy-dom@20.14.6:
+    resolution: {integrity: sha512-5DDsf4QmEIlRL6NkCv/fxSjYHHkZceL/IaYQdJc2h3G7DRTEai++VTjbfL0LB9geW2VrA3+vrjF3Efx+OTtX0Q==}
     engines: {node: '>=20.0.0'}
 
   has-flag@4.0.0:
@@ -3905,7 +3905,7 @@ snapshots:
 
   grapheme-splitter@1.0.4: {}
 
-  happy-dom@20.12.0:
+  happy-dom@20.14.6:
     dependencies:
       '@types/node': 26.4.0
       '@types/whatwg-mimetype': 3.0.2
@@ -4779,7 +4779,7 @@ snapshots:
       tsx: 4.23.13
       yaml: 2.9.1
 
-  vitest@4.1.10(@types/node@26.4.0)(happy-dom@20.12.0)(vite@8.3.8(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)):
+  vitest@4.1.10(@types/node@26.4.0)(happy-dom@20.14.6)(vite@8.3.8(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.10
       '@vitest/mocker': 4.1.10(vite@8.3.8(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
@@ -4803,7 +4803,7 @@ snapshots:
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 26.4.0
-      happy-dom: 20.12.0
+      happy-dom: 20.14.6
     transitivePeerDependencies:
       - msw
 

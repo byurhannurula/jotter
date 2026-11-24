@@ -49,7 +49,7 @@ jobs:
           TAURI_WEBDRIVER_PORT: "4445"
       - name: Keep screenshots and logs from a failed run
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-logs-${{ matrix.os }}
           path: e2e/logs
