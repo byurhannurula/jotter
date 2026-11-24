@@ -9,3 +9,17 @@ minimumReleaseAge: 2880
 # Packages explicitly allowed to run install/build (lifecycle) scripts.
 onlyBuiltDependencies:
   - esbuild
+
+# WebdriverIO (E2E only, never shipped) pins older majors of these. Both fixes
+# are past the release-age cooldown above.
+overrides:
+  serialize-javascript: ^7.1.4
+  basic-ftp: ^6.2.6
+
+auditConfig:
+  # extract-zip: the advisories name 2.0.2 as the fix, but the registry's newest
+  # is still 2.0.1 (2020). Reached only through @puppeteer/browsers, which the
+  # Tauri E2E run never uses to download a browser. Drop once 2.0.2 is out.
+  ignoreGhsas:
+    - GHSA-jmr9-qjv8-65gv
+    - GHSA-7pqw-9j4j-h8q3

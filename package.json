@@ -39,7 +39,7 @@
     "@tauri-apps/plugin-opener": "^2.7.3",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.1",
-    "markdown-it": "^14.3.0"
+    "markdown-it": "^14.3.3"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.6",
@@ -48,12 +48,12 @@
     "@wdio/mocha-framework": "9.33.1",
     "@wdio/tauri-service": "1.5.1",
     "fast-check": "^4.11.0",
-    "happy-dom": "^20.14.6",
+    "happy-dom": "^21.0.4",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.2",
     "prettier": "^3.10.1",
     "vite": "^8.3.8",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.12",
     "webdriverio": "9.33.1"
   },
   "lint-staged": {
