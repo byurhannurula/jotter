@@ -5,6 +5,20 @@ changelog page reads. That page keeps the bullets and drops the headings, and it
 reads line by line — so every bullet stays on one line, however long, and makes
 sense without its heading. Only the opening paragraph is prose.
 
+## v0.5.6
+
+A file you edit in another program now shows its new text in Jotter as soon as
+you come back to the window, instead of only after you close and open it again.
+
+### Files
+
+- **A file changed in another program shows its new text when you return to Jotter.** Before, the open tab kept the old text until you closed and opened it again, and your next keystroke ran into the "changed on disk" prompt. Your cursor and scroll position stay where they were.
+- **Text you typed but that is not saved yet is never replaced by the other program's version.** Jotter saves it, parks your copy beside the file, and asks you to pick Reload or Keep mine, as before.
+
+### Under the hood
+
+- **Jotter now runs on Tauri 2.12**, with its updater, dialog, opener and process plugins brought up to date with it.
+
 ## v0.5.5
 
 A settings switch that showed the wrong state, and could turn a setting off when
