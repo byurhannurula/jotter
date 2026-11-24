@@ -10,6 +10,7 @@ on:
     paths:
       - "package.json"
       - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
       - "src-tauri/Cargo.toml"
       - "src-tauri/Cargo.lock"
 
@@ -28,6 +29,12 @@ jobs:
 
   cargo-audit:
     runs-on: ubuntu-22.04
+    # audit-check reports through a check run, and opens an issue per advisory
+    # on scheduled runs; without these the job fails after a clean scan.
+    permissions:
+      contents: read
+      checks: write
+      issues: write
     steps:
       - uses: actions/checkout@v7
       - uses: rustsec/audit-check@v2
