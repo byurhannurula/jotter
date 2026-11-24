@@ -716,6 +716,56 @@ async function onFileConflict(d) {
   if (conflicted.has(d.id)) conflicted.set(d.id, dismiss);
 }
 
+let rechecking = false;
+
+/** Pick up an edit another program made to the open file while Jotter was in
+ *  the background.
+ *
+ *  activate() re-reads a file only on a tab switch, so a file edited elsewhere
+ *  kept showing the old text until it was closed and opened again — and the
+ *  next keystroke then ran into the conflict prompt. Runs when the window comes
+ *  back to the front, which is when the user can next look at it.
+ *
+ *  Typed text that has not reached disk is never replaced here: it is saved
+ *  now, and a save against a file that moved raises the usual conflict prompt.
+ *  A file that is gone is left alone; tools such as git remove and recreate
+ *  files, and the next save or tab switch reports it if it stays gone. */
+async function recheckOpenFile() {
+  if (rechecking) return;
+  rechecking = true;
+  try {
+    const id = currentId;
+    const d = drafts.get(id);
+    if (!d?.file_path || conflicted.has(id)) return;
+    if (unsaved.has(id)) return await flush();
+    await saving.get(id);
+    let text, mtime;
+    try {
+      [text, mtime] = await invoke("read_text_file", { path: d.file_path });
+    } catch {
+      return;
+    }
+    // The user may have switched tabs or typed while the file was read.
+    if (id !== currentId || unsaved.has(id) || editorDraftId !== id) return;
+    d.file_mtime = mtime;
+    if (text === d.content) return;
+    d.content = text;
+    const { selectionStart, selectionEnd, scrollTop } = editor;
+    showInEditor(id, text);
+    editor.setSelectionRange(
+      Math.min(selectionStart, text.length),
+      Math.min(selectionEnd, text.length),
+    );
+    editor.scrollTop = scrollTop;
+    refreshItemInPlace(id);
+    refreshPreview();
+    updateWindowTitle();
+    updateStatus();
+  } finally {
+    rechecking = false;
+  }
+}
+
 async function persist() {
   const d = drafts.get(currentId);
   if (!d || !unsaved.has(d.id)) return;
@@ -3412,6 +3462,13 @@ async function init() {
         toggleFocusMode(false);
       }
     }, 400);
+  });
+
+  // Both: the DOM event is what a test can fire, and Tauri's is the one that
+  // is sure to arrive when the native window becomes key.
+  window.addEventListener("focus", recheckOpenFile);
+  await appWindow.onFocusChanged(({ payload: focused }) => {
+    if (focused) recheckOpenFile();
   });
 
   await listen("menu", (event) => onMenu(event.payload));

@@ -622,6 +622,31 @@ describe("a file changed outside the app", () => {
     expect(app.host.disk.get("/notes/f.txt")).toBe("theirs"); // nothing left to write
   });
 
+  it("shows the new text when the window comes back to the front", async () => {
+    app = await boot(fileSeed());
+    await app.clickDraft("draft-f");
+    app.host.editOutside("/notes/f.txt", "edited elsewhere");
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(app.editor.value).toBe("edited elsewhere");
+    await app.type("edited elsewhere, then here");
+    await app.autosave();
+    expect(app.host.disk.get("/notes/f.txt")).toBe("edited elsewhere, then here"); // no conflict
+    expect(app.host.disk.has("/notes/f (conflicted copy).txt")).toBe(false);
+  });
+
+  it("does not replace typed text that has not been saved yet", async () => {
+    app = await boot(fileSeed());
+    await app.clickDraft("draft-f");
+    await app.type("mine");
+    app.host.editOutside("/notes/f.txt", "theirs");
+    window.dispatchEvent(new Event("focus"));
+    await settle();
+    expect(app.editor.value).toBe("mine");
+    expect(app.host.disk.get("/notes/f (conflicted copy).txt")).toBe("mine");
+    expect(await app.clickToast("Reload")).toBe(true);
+  });
+
   it("Keep mine writes the typed text over the file", async () => {
     await typeIntoChangedFile();
     expect(await app.clickToast("Keep mine")).toBe(true);
