@@ -39,7 +39,7 @@
     "@tauri-apps/plugin-opener": "^2.7.3",
     "@tauri-apps/plugin-process": "^2.4.0",
     "@tauri-apps/plugin-updater": "^2.14.1",
-    "markdown-it": "^14.3.3"
+    "markdown-it": "^15.0.3"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.6",
